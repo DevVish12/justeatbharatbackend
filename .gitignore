@@ -1,0 +1,8 @@
+node_modules/
+
+# Firebase Admin service account (never commit)
+# Expected by code:
+src/firebase-service-account.json
+
+# Common downloaded service account filename pattern:
+*firebase-adminsdk*.json
