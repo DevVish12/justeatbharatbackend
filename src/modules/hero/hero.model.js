@@ -94,7 +94,7 @@ export const insertHeroBanner = async ({
                 image_desktop AS imageDesktop,
                 image_tablet AS imageTablet,
                 image_mobile AS imageMobile,
-                COALESCE(image_desktop, image_url) AS imageUrl,
+                image_desktop AS imageUrl,
                 status,
                 created_at AS createdAt
             FROM hero_banners
@@ -115,7 +115,7 @@ export const getAllHeroBanners = async () => {
                 image_desktop AS imageDesktop,
                 image_tablet AS imageTablet,
                 image_mobile AS imageMobile,
-                COALESCE(image_desktop, image_url) AS imageUrl,
+                image_desktop AS imageUrl,
                 status,
                 created_at AS createdAt
             FROM hero_banners
@@ -133,7 +133,7 @@ export const getHeroBannerById = async (id) => {
                 image_desktop AS imageDesktop,
                 image_tablet AS imageTablet,
                 image_mobile AS imageMobile,
-                COALESCE(image_desktop, image_url) AS imageUrl,
+                image_desktop AS imageUrl,
                 status,
                 created_at AS createdAt
             FROM hero_banners
