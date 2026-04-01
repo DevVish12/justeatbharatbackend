@@ -1,0 +1,20 @@
+name: 🚀 Auto Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🚀 Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 187.127.140.241
+          username: root
+          password: ${{ secrets.VPS_PASSWORD }}
+          script: |
+            sh /var/www/deploy.sh
