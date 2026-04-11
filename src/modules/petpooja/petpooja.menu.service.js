@@ -304,35 +304,87 @@ export const fetchPetpoojaMenuFresh = async () => {
     return withCustomImages;
 };
 
+
+// export const getTestMenu = async () => {
+//     // Hybrid mode: if DB has menu data, serve from DB.
+//     const fromDb = await readMenuFromDb();
+//     if (fromDb) {
+//         cachedMenu = fromDb;
+//         cachedAtMs = Date.now();
+//         await writeMenuToRedis(fromDb);
+//         return fromDb;
+//     }
+
+//     // Redis-first: if we have a cached menu, return immediately.
+//     const fromRedis = await readMenuFromRedis();
+//     if (fromRedis) {
+//         cachedMenu = fromRedis;
+//         cachedAtMs = Date.now();
+//         return fromRedis;
+//     }
+
+//     const now = Date.now();
+//     // if (cachedMenu && now - cachedAtMs < CACHE_TTL_MS) return cachedMenu;
+
+//     // if (inFlightPromise) return inFlightPromise;
+
+//     inFlightPromise = (async () => {
+//         // const fresh = await fetchPetpoojaMenuFresh();
+//         // return fresh;
+//         return {
+//             categories: [],
+//             items: [],
+//             taxes: [],
+//             discounts: [],
+//             addongroups: [],
+//             addongroupitems: []
+//         };
+//     })().finally(() => {
+//         inFlightPromise = null;
+//     });
+
+//     return inFlightPromise;
+// };
+
+
 export const getTestMenu = async () => {
-    // Hybrid mode: if DB has menu data, serve from DB.
+
+    // 1. DB check
     const fromDb = await readMenuFromDb();
     if (fromDb) {
-        cachedMenu = fromDb;
-        cachedAtMs = Date.now();
-        await writeMenuToRedis(fromDb);
         return fromDb;
     }
 
-    // Redis-first: if we have a cached menu, return immediately.
-    const fromRedis = await readMenuFromRedis();
-    if (fromRedis) {
-        cachedMenu = fromRedis;
-        cachedAtMs = Date.now();
-        return fromRedis;
+    // 2. Redis check
+    // const fromRedis = await readMenuFromRedis();
+    // if (fromRedis) {
+    //     return fromRedis;
+    // }
+
+    // 3. FINAL → EMPTY (NO AUTO FETCH)
+    return {
+        categories: [],
+        items: [],
+        taxes: [],
+        discounts: [],
+        addongroups: [],
+        addongroupitems: []
+    };
+};
+
+export const hardResetMenu = async () => {
+    cachedMenu = null;
+    cachedAtMs = 0;
+    inFlightPromise = null;
+
+    if (isRedisEnabled()) {
+        try {
+            await redisClient.del("petpooja:menu");
+            console.log("Redis cleared");
+        } catch (e) {
+            console.log("Redis error:", e.message);
+        }
     }
 
-    const now = Date.now();
-    if (cachedMenu && now - cachedAtMs < CACHE_TTL_MS) return cachedMenu;
-
-    if (inFlightPromise) return inFlightPromise;
-
-    inFlightPromise = (async () => {
-        const fresh = await fetchPetpoojaMenuFresh();
-        return fresh;
-    })().finally(() => {
-        inFlightPromise = null;
-    });
-
-    return inFlightPromise;
+    console.log("Memory cache cleared");
 };
