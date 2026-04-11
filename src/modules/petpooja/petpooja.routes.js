@@ -5,9 +5,10 @@ import {
     menu,
     orderCallback,
     pushMenu,
+    resetMenu,
     storeStatus,
-    updateStoreStatus,
-    updateItemStock
+    updateItemStock,
+    updateStoreStatus
 } from "./petpooja.controller.js";
 
 const router = express.Router();
@@ -21,5 +22,6 @@ router.post("/cancel-order", cancelOrder);
 router.post("/store-status", storeStatus);
 router.post("/update_store_status", updateStoreStatus);
 router.post("/item_stock", updateItemStock);
+router.post("/reset-menu", resetMenu);
 
 export default router;

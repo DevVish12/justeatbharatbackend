@@ -2,6 +2,7 @@ import pool from "../../config/db.js";
 import { createCategoryTable as createMenuCategoryTable } from "../menu/menu.category.model.js";
 import {
     getTestMenu,
+    hardResetMenu,
     invalidatePetpoojaMenuCache,
     processIncomingPetpoojaMenu,
     updatePetpoojaMenuRedisCache,
@@ -293,6 +294,22 @@ export const updateItemStock = async (req, res) => {
             code: 400,
             status: "failed",
             message: "Stock status not updated successfully"
+        });
+    }
+};
+
+
+export const resetMenu = async (req, res) => {
+    try {
+        await hardResetMenu();
+
+        return res.json({
+            success: true,
+            message: "Menu reset successful"
+        });
+    } catch (err) {
+        return res.status(500).json({
+            error: err.message
         });
     }
 };
