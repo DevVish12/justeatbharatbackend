@@ -10,6 +10,7 @@ import { createCategoryTable } from "./modules/category/category.model.js";
 import { createContactTable } from "./modules/contact/contact.model.js";
 import { createHeroTable } from "./modules/hero/hero.model.js";
 import { createJobApplicationsTable } from "./modules/jobs/jobs.model.js";
+import { createCategoryTable as createMenuCategoryTable } from "./modules/menu/menu.category.model.js";
 import { createMenuTable } from "./modules/menu/menu.model.js";
 import { startPetpoojaMenuAutoSync } from "./modules/petpooja/petpooja.sync.service.js";
 import { createStoreSettingsTableIfNotExists } from "./modules/store/store.model.js";
@@ -24,6 +25,7 @@ const startServer = async () => {
         await createCategoryTable();
         await createContactTable();
         await createMenuTable();
+        await createMenuCategoryTable();
         await createJobApplicationsTable();
         await createStoreSettingsTableIfNotExists();
 
