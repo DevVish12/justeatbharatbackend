@@ -1,3 +1,4 @@
+import axios from "axios";
 import petpoojaConfig from "../../config/petpooja.js";
 import { PETPOOJA_SAVE_ORDER_ENDPOINT } from "./petpooja.constants.js";
 import {
@@ -127,6 +128,15 @@ export const sendOrderToPetpooja = async (payload) => {
                         dc_tax_percentage: payload.dc_tax_percentage,
                         pc_tax_percentage: payload.pc_tax_percentage,
                         enable_delivery: payload.enable_delivery,
+
+                        // 🔥 ADD THESE (VERY IMPORTANT)
+                        min_prep_time: payload.min_prep_time || 20,
+                        collect_cash:
+                            payload.payment_type === "COD"
+                                ? payload.total
+                                : "0",
+
+                        description: payload.description || "",
                         callback_url: petpoojaConfig.callbackUrl
                     }
                 },
@@ -162,7 +172,7 @@ export const sendOrderToPetpooja = async (payload) => {
     // }
 
     // 🔴 YAHAN ADD KARNA HAI
-    // console.log("FINAL ORDER PAYLOAD:", JSON.stringify(orderPayload, null, 2));
+    console.log("FINAL ORDER PAYLOAD:", JSON.stringify(orderPayload, null, 2));
 
     const response = await petpoojaOrderClient.post(
         PETPOOJA_SAVE_ORDER_ENDPOINT,
@@ -171,4 +181,30 @@ export const sendOrderToPetpooja = async (payload) => {
 
     return response.data;
 
+};
+
+
+
+export const cancelPetpoojaOrder = async (data) => {
+    try {
+        const response = await axios.post(
+            "https://qle1yy2ydc.execute-api.ap-southeast-1.amazonaws.com/V1/update_order_status",
+            {
+                app_key: process.env.PETPOOJA_APP_KEY,
+                app_secret: process.env.PETPOOJA_APP_SECRET,
+                access_token: process.env.PETPOOJA_ACCESS_TOKEN,
+                restID: data.restID,
+                orderID: "", // optional
+                clientorderID: data.clientorderID,
+                cancelReason: data.reason,
+                status: "-1"
+            }
+        );
+
+        return response.data;
+
+    } catch (error) {
+        console.error("Cancel order error:", error.response?.data || error.message);
+        throw error;
+    }
 };

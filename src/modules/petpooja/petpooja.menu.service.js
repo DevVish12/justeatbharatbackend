@@ -1,7 +1,10 @@
 import axios from "axios";
+import pool from "../../config/db.js";
 import config from "../../config/petpooja.js";
 import redisClient, { isRedisEnabled } from "../../config/redis.js";
 import { findDishImagesByItemIds } from "../admin/admin.model.js";
+import { createCategoryTable } from "../menu/menu.category.model.js";
+import { createMenuTable } from "../menu/menu.model.js";
 import { downloadMenuItemImage } from "./petpooja.image.utils.js";
 
 const FALLBACK_IMAGE = "/images/food-placeholder.jpg";
@@ -168,11 +171,131 @@ const writeMenuToRedis = async (menu) => {
     }
 };
 
+export const updatePetpoojaMenuRedisCache = async (menu) => {
+    cachedMenu = menu;
+    cachedAtMs = Date.now();
+    await writeMenuToRedis(menu);
+};
+
+const safeJsonParse = (value) => {
+    if (value === null || value === undefined) return null;
+    if (typeof value !== "string") return value;
+
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (!(trimmed.startsWith("{") || trimmed.startsWith("["))) return value;
+
+    try {
+        return JSON.parse(trimmed);
+    } catch {
+        return value;
+    }
+};
+
+const readMenuMetaFromDb = async () => {
+    try {
+        const [rows] = await pool.execute(
+            `SELECT categories_json, taxes_json, discounts_json, addongroups_json, addongroupitems_json
+             FROM petpooja_menu_meta
+             ORDER BY updated_at DESC
+             LIMIT 1`
+        );
+        const row = Array.isArray(rows) ? rows[0] : null;
+        if (!row) return null;
+
+        return {
+            categories: safeJsonParse(row.categories_json) || [],
+            taxes: safeJsonParse(row.taxes_json) || [],
+            discounts: safeJsonParse(row.discounts_json) || [],
+            addongroups: safeJsonParse(row.addongroups_json) || [],
+            addongroupitems: safeJsonParse(row.addongroupitems_json) || [],
+        };
+    } catch {
+        return null;
+    }
+};
+
+const readMenuFromDb = async () => {
+    try {
+        await createMenuTable();
+
+        const [rows] = await pool.execute(
+            `SELECT 
+                itemid,
+                itemname,
+                itemdescription,
+                price,
+                item_categoryid,
+                item_attributeid,
+                item_image_url,
+                in_stock,
+                itemallowvariation,
+                variation,
+                itemallowaddon,
+                addon,
+                is_combo,
+                is_recommend,
+                cuisine,
+                item_tags,
+                custom_image
+            FROM menu_items`
+        );
+
+        const items = Array.isArray(rows)
+            ? rows.map((r) => ({
+                ...r,
+                variation: safeJsonParse(r.variation),
+                addon: safeJsonParse(r.addon),
+                cuisine: safeJsonParse(r.cuisine),
+                item_tags: safeJsonParse(r.item_tags),
+            }))
+            : [];
+
+        if (!items.length) return null;
+
+        const meta = await readMenuMetaFromDb();
+
+        let categories = Array.isArray(meta?.categories) ? meta.categories : [];
+        if (!categories || categories.length === 0) {
+            try {
+                await createCategoryTable();
+                const [catRows] = await pool.execute(
+                    `SELECT categoryid, categoryname FROM menu_categories ORDER BY updated_at DESC`
+                );
+                categories = Array.isArray(catRows) ? catRows : [];
+            } catch (error) {
+                console.warn(
+                    "[Petpooja] menu_categories fallback read failed:",
+                    error?.message || error
+                );
+                categories = [];
+            }
+        }
+
+        return {
+            categories,
+            items,
+            taxes: meta?.taxes || [],
+            discounts: meta?.discounts || [],
+            addongroups: meta?.addongroups || [],
+            addongroupitems: meta?.addongroupitems || [],
+        };
+    } catch (error) {
+        console.warn("[Petpooja] DB menu read failed:", error?.message || error);
+        return null;
+    }
+};
+
+export const processIncomingPetpoojaMenu = async (menu) => {
+    const normalized = normalizeItems(menu);
+    const enriched = await enrichMenuWithLocalImages(normalized);
+    const withCustomImages = await applyCustomDishImages(enriched);
+    return withCustomImages;
+};
+
 export const fetchPetpoojaMenuFresh = async () => {
     const menu = await fetchMenuFromPetpooja();
-        const normalized = normalizeItems(menu);
-    const enriched = await enrichMenuWithLocalImages(menu);
-    const withCustomImages = await applyCustomDishImages(enriched);
+    const withCustomImages = await processIncomingPetpoojaMenu(menu);
 
     cachedMenu = withCustomImages;
     cachedAtMs = Date.now();
@@ -182,6 +305,15 @@ export const fetchPetpoojaMenuFresh = async () => {
 };
 
 export const getTestMenu = async () => {
+    // Hybrid mode: if DB has menu data, serve from DB.
+    const fromDb = await readMenuFromDb();
+    if (fromDb) {
+        cachedMenu = fromDb;
+        cachedAtMs = Date.now();
+        await writeMenuToRedis(fromDb);
+        return fromDb;
+    }
+
     // Redis-first: if we have a cached menu, return immediately.
     const fromRedis = await readMenuFromRedis();
     if (fromRedis) {
