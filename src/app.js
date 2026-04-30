@@ -86,9 +86,9 @@ app.get("/api/test-firebase", async (req, res) => {
         });
     }
 });
+app.use("/api/admin", adminImageRoutes);
 
 app.use(`/api/${env.ADMIN_API_PREFIX}`, adminRoutes);
-app.use("/api/admin", adminImageRoutes);
 app.use("/api", adminPetpoojaSyncRoutes);
 app.use("/api", authRoutes);
 app.use("/api", heroRoutes);
