@@ -36,22 +36,22 @@ app.use(
 // );
 const allowedOrigins = env.CORS_ORIGIN.split(",");
 
-app.use(
-    cors({
-        origin: function (origin, callback) {
-            if (!origin || allowedOrigins.includes(origin)) {
-                callback(null, true);
-            } else {
-                callback(new Error("Not allowed by CORS"));
-            }
-        },
-        credentials: true,
-    })
-);
-app.options("*", cors({
-    origin: allowedOrigins,
-    credentials: true
-}));
+const corsOptions = {
+    origin: function (origin, callback) {
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error("Not allowed by CORS"));
+        }
+    },
+    credentials: true,
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
+
+
+
 app.use(cookieParser());
 app.use(express.json({ limit: "1mb" }));
 // VERY IMPORTANT
