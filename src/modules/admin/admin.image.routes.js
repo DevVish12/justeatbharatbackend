@@ -27,7 +27,7 @@ const fileFilter = (req, file, cb) => {
 
 const uploader = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 300 * 1024 },
+    limits: { fileSize: 5 * 1024 * 1024 },
     fileFilter,
 });
 
@@ -40,7 +40,7 @@ const uploadDishImageMiddleware = (req, res, next) => {
         if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
             return res.status(400).json({
                 success: false,
-                message: "Image must be smaller than 300KB",
+                message: "Image must be smaller than 5MB",
             });
         }
 
@@ -64,7 +64,7 @@ const uploadDishImagesMiddleware = (req, res, next) => {
         if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
             return res.status(400).json({
                 success: false,
-                message: "Image must be smaller than 300KB",
+                message: "Image must be smaller than 5MB",
             });
         }
 
