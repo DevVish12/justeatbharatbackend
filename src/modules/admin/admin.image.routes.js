@@ -80,7 +80,7 @@ const router = express.Router();
 
 // POST /api/admin/upload-dish-image
 router.post(
-    "/admin/upload-dish-image",
+    "/upload-dish-image",
     adminAuthMiddleware,
     uploadDishImageMiddleware,
     uploadDishImageController
@@ -88,7 +88,7 @@ router.post(
 
 // POST /api/admin/upload-dish-images
 router.post(
-    "/admin/upload-dish-images",
+    "/upload-dish-images",
     adminAuthMiddleware,
     uploadDishImagesMiddleware,
     uploadDishImagesController
