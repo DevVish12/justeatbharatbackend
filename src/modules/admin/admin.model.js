@@ -113,6 +113,14 @@ export const findDishImagesByItemIds = async (itemIds) => {
     return map;
 };
 
+// Used to merge dish_images into Petpooja menu payloads.
+export const getAllDishImages = async () => {
+    const [rows] = await pool.execute(
+        "SELECT itemid, image_path AS image FROM dish_images"
+    );
+    return Array.isArray(rows) ? rows : [];
+};
+
 export const findAdminByEmail = async (email) => {
     const [rows] = await pool.execute(
         "SELECT id, email, password_hash AS passwordHash FROM admins WHERE email = ? LIMIT 1",

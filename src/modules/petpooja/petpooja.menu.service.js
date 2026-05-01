@@ -2,7 +2,7 @@ import axios from "axios";
 import pool from "../../config/db.js";
 import config from "../../config/petpooja.js";
 import redisClient, { isRedisEnabled } from "../../config/redis.js";
-import { findDishImagesByItemIds } from "../admin/admin.model.js";
+import { getAllDishImages } from "../admin/admin.model.js";
 import { createCategoryTable } from "../menu/menu.category.model.js";
 import { createMenuTable } from "../menu/menu.model.js";
 import { downloadMenuItemImage } from "./petpooja.image.utils.js";
@@ -94,21 +94,25 @@ const applyCustomDishImages = async (menu) => {
     const items = safeArray(menu?.items);
     if (items.length === 0) return menu;
 
-    const itemIds = Array.from(
-        new Set(
-            items
-                .map((it) => String(it?.itemid ?? it?.id ?? "").trim())
-                .filter(Boolean)
-        )
-    );
+    const dbImages = await getAllDishImages();
+    if (!Array.isArray(dbImages) || dbImages.length === 0) return menu;
 
-    const imageMap = await findDishImagesByItemIds(itemIds);
-    if (!imageMap || imageMap.size === 0) return menu;
+    const imageMap = new Map();
+    for (const img of dbImages) {
+        const key = String(img?.itemid ?? "").trim();
+        const value = String(img?.image ?? "").trim();
+        if (key && value) imageMap.set(key, value);
+    }
+    if (imageMap.size === 0) return menu;
 
     const enrichedItems = items.map((item) => {
         const itemId = String(item?.itemid ?? item?.id ?? "").trim();
         const customImage = imageMap.get(itemId) || null;
-        if (!customImage) return { ...item, custom_image: null };
+        if (!customImage) {
+            // Preserve any existing custom_image present in DB snapshots.
+            const existing = String(item?.custom_image ?? "").trim();
+            return existing ? { ...item, custom_image: existing } : item;
+        }
 
         return {
             ...item,
@@ -352,7 +356,7 @@ export const getTestMenu = async () => {
     // 1. DB check
     const fromDb = await readMenuFromDb();
     if (fromDb) {
-        return fromDb;
+        return await applyCustomDishImages(fromDb);
     }
 
     // 2. Redis check
