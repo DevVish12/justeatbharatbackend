@@ -172,7 +172,7 @@ export const sendOrderToPetpooja = async (payload) => {
     // }
 
     // 🔴 YAHAN ADD KARNA HAI
-    console.log("FINAL ORDER PAYLOAD:", JSON.stringify(orderPayload, null, 2));
+    console.log("FINAL ORDER PAYLOAD", orderPayload);
 
     const response = await petpoojaOrderClient.post(
         PETPOOJA_SAVE_ORDER_ENDPOINT,

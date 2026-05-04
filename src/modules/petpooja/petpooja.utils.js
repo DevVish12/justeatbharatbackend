@@ -84,7 +84,6 @@ export const assertPetpoojaConfigured = () => {
 
     const missing = [];
 
-    if (!petpoojaConfig.menuBaseUrl) missing.push("PETPOOJA_MENU_BASE_URL");
     if (!petpoojaConfig.orderBaseUrl) missing.push("PETPOOJA_ORDER_BASE_URL");
 
     if (!petpoojaConfig.appKey) missing.push("PETPOOJA_APP_KEY");
@@ -100,11 +99,15 @@ export const assertPetpoojaConfigured = () => {
     }
 };
 
-export const petpoojaMenuClient = axios.create({
-    baseURL: petpoojaConfig.menuBaseUrl,
-    timeout: PETPOOJA_DEFAULT_TIMEOUT_MS,
-    headers: buildPetpoojaHeaders(),
-});
+// LIVE is PUSH-only: menuBaseUrl is intentionally not required.
+// Keep client nullable to prevent accidental relative requests.
+export const petpoojaMenuClient = petpoojaConfig.menuBaseUrl
+    ? axios.create({
+        baseURL: petpoojaConfig.menuBaseUrl,
+        timeout: PETPOOJA_DEFAULT_TIMEOUT_MS,
+        headers: buildPetpoojaHeaders(),
+    })
+    : null;
 
 export const petpoojaOrderClient = axios.create({
     baseURL: petpoojaConfig.orderBaseUrl,

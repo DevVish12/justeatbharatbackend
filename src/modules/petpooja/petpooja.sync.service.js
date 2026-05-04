@@ -2,9 +2,9 @@ import pool from "../../config/db.js";
 import redisClient, { isRedisEnabled } from "../../config/redis.js";
 import { createMenuTable } from "../menu/menu.model.js";
 import {
-    fetchPetpoojaMenuFresh,
     getTestMenu,
     invalidatePetpoojaMenuCache,
+    updatePetpoojaMenuRedisCache,
 } from "./petpooja.menu.service.js";
 
 let syncInterval = null;
@@ -25,39 +25,34 @@ const hasDbMenu = async () => {
 export const startPetpoojaMenuAutoSync = () => {
     if (syncInterval) return;
 
-    console.log("[Petpooja] Auto menu sync started (every 2 minutes)");
+    console.log(
+        "[Petpooja] Auto menu sync started (every 2 minutes, DB→cache only; no fetch)"
+    );
 
     const syncMenu = async () => {
         if (syncInProgress) return;
         syncInProgress = true;
 
         try {
-            // Hybrid mode: if DB already has menu (typically from push), don't overwrite caches via fetch.
-            if (await hasDbMenu()) {
+            // PUSH-only live integration: never fetch menu.
+            // If DB has menu, warm Redis/in-memory cache from DB.
+            if (!(await hasDbMenu())) {
                 return;
             }
 
-            const menu = await fetchPetpoojaMenuFresh();
+            const menu = await getTestMenu();
+            if (!menu) return;
 
-            // fetchPetpoojaMenuFresh already updates Redis when enabled.
             if (isRedisEnabled()) {
+                await updatePetpoojaMenuRedisCache(menu);
                 const cached = await redisClient.get("petpooja:menu");
                 if (cached) {
-                    console.log("[Petpooja] Menu synced and cached in Redis");
-                } else {
-                    console.log("[Petpooja] Menu synced (Redis unavailable)");
+                    console.log("[Petpooja] Menu cache warmed in Redis from DB");
                 }
-            } else {
-                console.log("[Petpooja] Menu synced (Redis disabled)");
             }
 
-            // Ensure we don't serve stale in-memory data when Redis is the source of truth.
-            if (isRedisEnabled()) {
-                invalidatePetpoojaMenuCache();
-            }
-
-            // Optional future: also persist snapshot into MySQL here if desired.
-            void menu;
+            // Ensure in-memory doesn't serve stale data if something else cached it earlier.
+            invalidatePetpoojaMenuCache();
         } catch (err) {
             console.error("[Petpooja] Sync error:", err?.message || err);
         } finally {
@@ -321,10 +316,10 @@ export const syncPushMenuData = async (restaurant) => {
                 item_attributeid = VALUES(item_attributeid),
                 item_image_url = VALUES(item_image_url),
                 in_stock = VALUES(in_stock),
-                itemallowvariation = VALUES(itemallowvariation),
-                variation = VALUES(variation),
-                itemallowaddon = VALUES(itemallowaddon),
-                addon = VALUES(addon),
+                itemallowvariation = COALESCE(VALUES(itemallowvariation), itemallowvariation),
+                variation = COALESCE(VALUES(variation), variation),
+                itemallowaddon = COALESCE(VALUES(itemallowaddon), itemallowaddon),
+                addon = COALESCE(VALUES(addon), addon),
                 is_combo = VALUES(is_combo),
                 is_recommend = VALUES(is_recommend),
                 cuisine = VALUES(cuisine),
@@ -348,6 +343,11 @@ export const syncPushMenuData = async (restaurant) => {
             const childVariations = it?.child_variations ?? null;
             const hasVariations = Array.isArray(childVariations) && childVariations.length > 0;
 
+            // PRICE FIX (CRITICAL): prefer item price if >0; else fall back to first child variation price.
+            const price = Number(it?.price) > 0
+                ? Number(it.price)
+                : (it?.child_variations?.[0]?.price || 0);
+
             // Add-on mapping differs across payloads; store whatever linkage we receive.
             const addonPayload =
                 it?.addongroups ??
@@ -364,7 +364,7 @@ export const syncPushMenuData = async (restaurant) => {
                 itemid,
                 it?.itemname ?? null,
                 it?.itemdescription ?? null,
-                toDecimal(it?.price),
+                toDecimal(price),
                 itemCategoryId,
                 it?.item_attributeid ?? null,
                 it?.item_image_url ?? null,

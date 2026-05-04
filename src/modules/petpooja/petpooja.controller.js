@@ -149,16 +149,12 @@ export const updateStoreStatus = async (req, res) => {
 };
 
 export const pushMenu = async (req, res) => {
-    console.log("PUSH MENU RECEIVED:", JSON.stringify(req.body, null, 2));
+    console.log("PUSH MENU RECEIVED", JSON.stringify(req.body, null, 2));
 
     try {
         await createMenuCategoryTable();
 
-        // const restaurant = req.body?.restaurants?.[0];
-
-        // const categories = restaurant?.categories;
-        // const items = restaurant?.items;
-        const restaurant = req.body?.restaurants?.[0];
+        const restaurant = req.body?.restaurants?.[0] || {};
 
         // Petpooja payloads vary: sometimes categories/items are top-level, sometimes nested under restaurants[0].
         // Prefer top-level if present, otherwise fall back to restaurant.*
@@ -177,19 +173,10 @@ export const pushMenu = async (req, res) => {
         console.log("🔥 CATEGORIES RECEIVED:", categories.length);
         console.log("🔥 ITEMS RECEIVED:", items.length);
 
-
-        if (!Array.isArray(req.body?.restaurants) || !restaurant) {
-            return res.status(200).json({
-                success: "0",
-                message: "Menu push failed",
-            });
-        }
-
-        if (!Array.isArray(categories) || !Array.isArray(items)) {
-            return res.status(200).json({
-                success: "0",
-                message: "Menu push failed",
-            });
+        // Petpooja expects an ACK-style success even if nothing is sent.
+        // For empty payloads we return plain "0" (SUCCESS) to prevent trigger failures.
+        if (categories.length === 0 || items.length === 0) {
+            return res.status(200).send("0");
         }
 
         // Save categories (Petpooja categoryid/categoryname) into DB.
@@ -229,18 +216,21 @@ export const pushMenu = async (req, res) => {
 
         // Refresh caches so GET /api/petpooja/menu serves latest data.
         invalidatePetpoojaMenuCache();
-        await updatePetpoojaMenuRedisCache(processedMenu);
+        try {
+            await updatePetpoojaMenuRedisCache(processedMenu);
+        } catch (error) {
+            console.warn(
+                "[Petpooja] Redis cache refresh after push failed:",
+                error?.message || error
+            );
+        }
 
-        return res.status(200).json({
-            success: "1",
-            message: "Menu items are successfully listed.",
-        });
+        // ACK SUCCESS (Petpooja)
+        return res.status(200).send("0");
     } catch (error) {
         console.error("[Petpooja] pushmenu failed:", error?.message || error);
-        return res.status(200).json({
-            success: "0",
-            message: "Menu push failed",
-        });
+        // Always ACK "0" so Petpooja doesn't mark trigger as FAILED.
+        return res.status(200).send("0");
     }
 };
 

@@ -3,6 +3,7 @@ import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 import env from "./config/env.js";
+import pool from "./config/db.js";
 import { initFirebaseAdmin } from "./config/firebaseAdmin.js";
 import errorMiddleware from "./middlewares/error.middleware.js";
 import adminImageRoutes from "./modules/admin/admin.image.routes.js";
@@ -67,6 +68,20 @@ app.use(
 
 app.get("/api/health", (req, res) => {
     res.status(200).json({ status: "ok" });
+});
+
+// Temporary debug route: verify Petpooja push menu writes to DB.
+app.get("/api/debug/menu-count", async (req, res) => {
+    try {
+        const [rows] = await pool.execute(
+            "SELECT COUNT(*) AS count FROM menu_items"
+        );
+        const count = Array.isArray(rows) ? rows?.[0]?.count : null;
+        return res.status(200).json({ count: Number(count ?? 0) });
+    } catch (error) {
+        console.error("[debug/menu-count] failed:", error?.message || error);
+        return res.status(500).json({ message: "Failed to read menu count" });
+    }
 });
 
 app.get("/api/test-firebase", async (req, res) => {
