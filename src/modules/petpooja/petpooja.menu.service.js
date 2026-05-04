@@ -101,26 +101,37 @@ const applyCustomDishImages = async (menu) => {
     for (const img of dbImages) {
         const key = String(img?.itemid ?? "").trim();
         const value = String(img?.image ?? "").trim();
-        if (key && value) imageMap.set(key, value);
+        const updatedAt = img?.updated_at;
+        if (key && value) imageMap.set(key, { image: value, updated_at: updatedAt });
     }
     if (imageMap.size === 0) return menu;
 
     const enrichedItems = items.map((item) => {
         const itemId = String(item?.itemid ?? item?.id ?? "").trim();
-        const customImage = imageMap.get(itemId) || null;
-        if (!customImage) {
+        const mapped = imageMap.get(itemId) || null;
+        if (!mapped?.image) {
             // Preserve any existing custom_image present in DB snapshots.
             const existing = String(item?.custom_image ?? "").trim();
             return existing ? { ...item, custom_image: existing } : item;
         }
 
-        return {
+        const customImage = mapped.image;
+        const image_updated_at = mapped.updated_at;
+
+        const merged = {
             ...item,
             custom_image: customImage,
+            image: customImage,
             // Also override common fields for compatibility with existing consumers.
             item_image_url: customImage,
             local_image: customImage,
+            // IMPORTANT
+            image_updated_at,
         };
+
+        // Temporary debug
+        console.log(item.id ?? item.itemid, merged.image_updated_at);
+        return merged;
     });
 
     return {

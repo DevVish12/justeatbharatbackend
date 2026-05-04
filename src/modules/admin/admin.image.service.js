@@ -35,7 +35,12 @@ export const saveDishImageAndUpsertRecord = async ({ itemid, file }) => {
 
     const imagePath = `/uploads/menu/${filename}`;
 
-    await upsertDishImage({ itemid: itemId, imagePath });
+    const timestamp = Date.now();
+    await upsertDishImage({
+        itemid: itemId,
+        imagePath,
+        updated_at: timestamp,
+    });
 
     // Best-effort: ensure the menu endpoint reflects updates immediately.
     try {
@@ -96,7 +101,12 @@ export const saveDishImagesAndUpsertRecords = async ({ files }) => {
         await sharp(file.buffer).rotate().webp().toFile(fullPath);
 
         const imagePath = `/uploads/menu/${filename}`;
-        await upsertDishImage({ itemid: itemId, imagePath });
+        const timestamp = Date.now();
+        await upsertDishImage({
+            itemid: itemId,
+            imagePath,
+            updated_at: timestamp,
+        });
         uploaded.push(imagePath);
     }
 

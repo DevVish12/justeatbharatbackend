@@ -44,15 +44,37 @@ export const createDishImagesTableIfNotExists = async () => {
             itemid VARCHAR(64) NOT NULL,
             image_path VARCHAR(255) NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            updated_at BIGINT,
             UNIQUE KEY uniq_dish_images_itemid (itemid)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
+
+    const [rows] = await pool.execute(
+        `
+          SELECT DATA_TYPE
+          FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'dish_images'
+            AND COLUMN_NAME = 'updated_at'
+        `
+    );
+
+    if (!rows.length) {
+        await pool.execute("ALTER TABLE dish_images ADD COLUMN updated_at BIGINT");
+    } else {
+        const dataType = String(rows[0]?.DATA_TYPE || "").toLowerCase();
+        if (dataType !== "bigint") {
+            await pool.execute("ALTER TABLE dish_images MODIFY COLUMN updated_at BIGINT");
+        }
+    }
 };
 
-export const upsertDishImage = async ({ itemid, imagePath }) => {
+export const upsertDishImage = async ({ itemid, imagePath, updated_at }) => {
     const itemId = String(itemid || "").trim();
     const path = String(imagePath || "").trim();
+    const updatedAt = Number.isFinite(Number(updated_at))
+        ? Number(updated_at)
+        : Date.now();
 
     if (!itemId) {
         const error = new Error("itemid is required");
@@ -68,16 +90,16 @@ export const upsertDishImage = async ({ itemid, imagePath }) => {
 
     await pool.execute(
         `
-        INSERT INTO dish_images (itemid, image_path)
-        VALUES (?, ?)
+        INSERT INTO dish_images (itemid, image_path, updated_at)
+        VALUES (?, ?, ?)
         ON DUPLICATE KEY UPDATE
             image_path = VALUES(image_path),
-            updated_at = CURRENT_TIMESTAMP
+            updated_at = VALUES(updated_at)
         `,
-        [itemId, path]
+        [itemId, path, updatedAt]
     );
 
-    return { itemid: itemId, image_path: path };
+    return { itemid: itemId, image_path: path, updated_at: updatedAt };
 };
 
 export const findDishImageByItemId = async (itemid) => {
@@ -116,7 +138,7 @@ export const findDishImagesByItemIds = async (itemIds) => {
 // Used to merge dish_images into Petpooja menu payloads.
 export const getAllDishImages = async () => {
     const [rows] = await pool.execute(
-        "SELECT itemid, image_path AS image FROM dish_images"
+        "SELECT itemid, image_path AS image, updated_at FROM dish_images"
     );
     return Array.isArray(rows) ? rows : [];
 };
