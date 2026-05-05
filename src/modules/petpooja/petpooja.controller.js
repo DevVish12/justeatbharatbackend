@@ -1,5 +1,6 @@
 import pool from "../../config/db.js";
 import { createCategoryTable as createMenuCategoryTable } from "../menu/menu.category.model.js";
+
 import {
     getTestMenu,
     hardResetMenu,
@@ -7,12 +8,16 @@ import {
     updatePetpoojaMenuRedisCache,
 } from "./petpooja.menu.service.js";
 
-import { cancelPetpoojaOrder, sendOrderToPetpooja } from "./petpooja.order.service.js";
+import {
+    cancelPetpoojaOrder,
+    sendOrderToPetpooja
+} from "./petpooja.order.service.js";
+
 import { syncPushMenuData } from "./petpooja.sync.service.js";
 import { toHttpErrorPayload } from "./petpooja.utils.js";
 
 
-// ================= MENU =================
+/* ================= MENU ================= */
 export const menu = async (req, res) => {
     try {
         const data = await getTestMenu();
@@ -27,10 +32,13 @@ export const menu = async (req, res) => {
 };
 
 
-// ================= CREATE ORDER =================
+/* ================= CREATE ORDER ================= */
 export const createOrder = async (req, res) => {
     try {
         const payload = req.body;
+
+        console.log("FINAL ORDER PAYLOAD:", JSON.stringify(payload, null, 2));
+
         const result = await sendOrderToPetpooja(payload);
 
         return res.status(200).json({
@@ -45,14 +53,14 @@ export const createOrder = async (req, res) => {
 };
 
 
-// ================= ORDER CALLBACK =================
+/* ================= ORDER CALLBACK ================= */
 export const orderCallback = async (req, res) => {
-    console.log("Petpooja order callback:", req.body);
+    console.log("Petpooja CALLBACK:", req.body);
     return res.status(200).json({ status: "received" });
 };
 
 
-// ================= CANCEL ORDER =================
+/* ================= CANCEL ORDER ================= */
 export const cancelOrder = async (req, res) => {
     try {
         const result = await cancelPetpoojaOrder(req.body);
@@ -63,6 +71,7 @@ export const cancelOrder = async (req, res) => {
         });
 
     } catch (error) {
+        console.error("Cancel error:", error);
         return res.status(500).json({
             success: false,
             message: "Cancel failed",
@@ -71,7 +80,7 @@ export const cancelOrder = async (req, res) => {
 };
 
 
-// ================= STORE STATUS =================
+/* ================= STORE STATUS ================= */
 export const storeStatus = async (req, res) => {
     return res.status(200).json({
         http_code: 200,
@@ -82,9 +91,9 @@ export const storeStatus = async (req, res) => {
 };
 
 
-// ================= UPDATE STORE STATUS =================
+/* ================= UPDATE STORE ================= */
 export const updateStoreStatus = async (req, res) => {
-    console.log("UPDATE STORE STATUS:", req.body);
+    console.log("UPDATE STORE:", req.body);
 
     try {
         const { restID } = req.body;
@@ -92,22 +101,23 @@ export const updateStoreStatus = async (req, res) => {
         return res.status(200).json({
             http_code: 200,
             status: "success",
-            message: `Store status updated for ${restID}`,
+            message: `Store updated for ${restID}`,
         });
 
     } catch {
         return res.status(200).json({
             http_code: 400,
             status: "failed",
-            message: "Failed to update store status",
+            message: "Update failed",
         });
     }
 };
 
 
-// ================= 🔥 PUSH MENU (FINAL FIX) =================
+/* ================= 🔥 PUSH MENU ================= */
 export const pushMenu = async (req, res) => {
-    console.log("PUSH MENU RECEIVED", JSON.stringify(req.body, null, 2));
+
+    console.log("🔥 PUSH MENU RECEIVED:", JSON.stringify(req.body, null, 2));
 
     try {
         await createMenuCategoryTable();
@@ -116,21 +126,26 @@ export const pushMenu = async (req, res) => {
 
         const categories = Array.isArray(req.body?.categories)
             ? req.body.categories
-            : restaurant.categories || [];
+            : Array.isArray(restaurant?.categories)
+                ? restaurant.categories
+                : [];
 
         const items = Array.isArray(req.body?.items)
             ? req.body.items
-            : restaurant.items || [];
+            : Array.isArray(restaurant?.items)
+                ? restaurant.items
+                : [];
 
-        console.log("CATEGORIES:", categories.length);
-        console.log("ITEMS:", items.length);
+        console.log("📦 CATEGORIES:", categories.length);
+        console.log("🍽 ITEMS:", items.length);
 
-        // ❗ Petpooja requirement → always return "0"
-        if (!categories.length || !items.length) {
+        // ❗ ALWAYS ACK SUCCESS (Petpooja rule)
+        if (!categories.length && !items.length) {
+            console.log("⚠️ Empty menu push");
             return res.status(200).send("0");
         }
 
-        // ===== SAVE CATEGORY =====
+        /* ===== SAVE CATEGORY ===== */
         const upsertSql = `
             INSERT INTO menu_categories (categoryid, categoryname)
             VALUES (?, ?)
@@ -140,42 +155,43 @@ export const pushMenu = async (req, res) => {
         `;
 
         for (const c of categories) {
-            const id = String(c.categoryid || "").trim();
-            const name = String(c.categoryname || "").trim();
+            const id = String(c?.categoryid ?? "").trim();
+            const name = String(c?.categoryname ?? "").trim();
 
             if (!id || !name) continue;
 
             await pool.execute(upsertSql, [id, name]);
         }
 
-        // ===== SAVE MENU (FIXED) =====
-        const restaurantForSync = {
+        /* ===== SAVE MENU ===== */
+        await syncPushMenuData({
             ...restaurant,
             categories,
             items,
-        };
+        });
 
-        await syncPushMenuData(restaurantForSync);
-
-        // ===== CACHE =====
+        /* ===== CACHE CLEAR ===== */
         invalidatePetpoojaMenuCache();
 
         try {
-            await updatePetpoojaMenuRedisCache(await getTestMenu());
+            const menu = await getTestMenu();
+            await updatePetpoojaMenuRedisCache(menu);
         } catch (e) {
-            console.log("Redis skipped:", e.message);
+            console.log("⚠️ Redis skipped:", e.message);
         }
+
+        console.log("✅ PUSH MENU SUCCESS");
 
         return res.status(200).send("0");
 
     } catch (error) {
-        console.error("PUSH MENU ERROR:", error);
-        return res.status(200).send("0");
+        console.error("❌ PUSH MENU ERROR:", error);
+        return res.status(200).send("0"); // ALWAYS ACK
     }
 };
 
 
-// ================= STOCK UPDATE =================
+/* ================= STOCK ================= */
 export const updateItemStock = async (req, res) => {
     try {
         const { restID, inStock, itemID } = req.body;
@@ -215,7 +231,7 @@ export const updateItemStock = async (req, res) => {
 };
 
 
-// ================= RESET MENU =================
+/* ================= RESET ================= */
 export const resetMenu = async (req, res) => {
     try {
         await hardResetMenu();
