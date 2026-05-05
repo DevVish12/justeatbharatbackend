@@ -10,6 +10,9 @@ import {
 let syncInterval = null;
 let syncInProgress = false;
 
+/* =========================
+   CHECK DB MENU EXISTS
+========================= */
 const hasDbMenu = async () => {
     try {
         await createMenuTable();
@@ -22,21 +25,21 @@ const hasDbMenu = async () => {
     }
 };
 
+/* =========================
+   AUTO SYNC (DB → CACHE)
+========================= */
 export const startPetpoojaMenuAutoSync = () => {
     if (syncInterval) return;
 
-    console.log(
-        "[Petpooja] Auto menu sync started (every 2 minutes, DB→cache only; no fetch)"
-    );
+    console.log("[Petpooja] Auto sync started (DB → cache)");
 
     const syncMenu = async () => {
         if (syncInProgress) return;
         syncInProgress = true;
 
         try {
-            // PUSH-only live integration: never fetch menu.
-            // If DB has menu, warm Redis/in-memory cache from DB.
             if (!(await hasDbMenu())) {
+                console.log("⚠️ No menu in DB yet");
                 return;
             }
 
@@ -45,49 +48,39 @@ export const startPetpoojaMenuAutoSync = () => {
 
             if (isRedisEnabled()) {
                 await updatePetpoojaMenuRedisCache(menu);
-                const cached = await redisClient.get("petpooja:menu");
-                if (cached) {
-                    console.log("[Petpooja] Menu cache warmed in Redis from DB");
-                }
+                console.log("✅ Redis cache updated");
             }
 
-            // Ensure in-memory doesn't serve stale data if something else cached it earlier.
             invalidatePetpoojaMenuCache();
+            console.log("✅ Memory cache cleared");
+
         } catch (err) {
-            console.error("[Petpooja] Sync error:", err?.message || err);
+            console.error("[SYNC ERROR]", err?.message || err);
         } finally {
             syncInProgress = false;
         }
     };
 
-    // Run immediately
     syncMenu();
-
-    // Then repeat
     syncInterval = setInterval(syncMenu, 120000);
 };
 
+/* =========================
+   HELPERS
+========================= */
 const safeJson = (value) => {
-    if (value === undefined) return null;
-    if (value === null) return null;
+    if (value === undefined || value === null) return null;
 
-    // If already a string, try to normalize to JSON.
     if (typeof value === "string") {
         const trimmed = value.trim();
         if (!trimmed) return null;
 
-        // If looks like JSON, keep as-is if valid.
-        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-            try {
-                JSON.parse(trimmed);
-                return trimmed;
-            } catch {
-                return JSON.stringify(trimmed);
-            }
+        try {
+            JSON.parse(trimmed);
+            return trimmed;
+        } catch {
+            return JSON.stringify(trimmed);
         }
-
-        // Otherwise store as JSON string.
-        return JSON.stringify(trimmed);
     }
 
     try {
@@ -102,46 +95,32 @@ const toDecimal = (value) => {
     return Number.isFinite(n) ? n : null;
 };
 
+/* =========================
+   NORMAL MENU SYNC
+========================= */
 export const syncPetpoojaMenu = async () => {
-    // Ensure DB schema exists even if the server started with an older table.
     await createMenuTable();
 
     const menu = await getTestMenu();
     const items = Array.isArray(menu?.items) ? menu.items : [];
 
     const connection = await pool.getConnection();
+
     try {
         await connection.beginTransaction();
 
         const sql = `
             INSERT INTO menu_items (
-                itemid,
-                itemname,
-                itemdescription,
-                price,
-                item_categoryid,
-                item_attributeid,
-                item_image_url,
-                in_stock,
-                itemallowvariation,
-                variation,
-                itemallowaddon,
-                addon,
-                is_combo,
-                is_recommend,
-                cuisine,
-                item_tags,
-                custom_image
-            ) VALUES (
-                ?,?,?,?,?,?,?,?,
-                ?,?,?,?,?,?,?,?,?
-            )
+                itemid,itemname,itemdescription,price,item_categoryid,
+                item_attributeid,item_image_url,in_stock,
+                itemallowvariation,variation,itemallowaddon,addon,
+                is_combo,is_recommend,cuisine,item_tags,custom_image
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON DUPLICATE KEY UPDATE
                 itemname = VALUES(itemname),
                 itemdescription = VALUES(itemdescription),
                 price = VALUES(price),
                 item_categoryid = VALUES(item_categoryid),
-                item_attributeid = VALUES(item_attributeid),
                 item_image_url = VALUES(item_image_url),
                 in_stock = VALUES(in_stock),
                 itemallowvariation = VALUES(itemallowvariation),
@@ -152,6 +131,7 @@ export const syncPetpoojaMenu = async () => {
                 is_recommend = VALUES(is_recommend),
                 cuisine = VALUES(cuisine),
                 item_tags = VALUES(item_tags),
+                custom_image = COALESCE(VALUES(custom_image), custom_image),
                 updated_at = CURRENT_TIMESTAMP
         `;
 
@@ -161,18 +141,12 @@ export const syncPetpoojaMenu = async () => {
             const itemid = String(it?.itemid ?? "").trim();
             if (!itemid) continue;
 
-            const itemCategoryId =
-                it?.item_categoryid ||
-                it?.categoryid ||
-                it?.categoryId ||
-                null;
-
             const params = [
                 itemid,
                 it?.itemname ?? null,
                 it?.itemdescription ?? null,
                 toDecimal(it?.price),
-                itemCategoryId,
+                it?.categoryid ?? null,
                 it?.item_attributeid ?? null,
                 it?.item_image_url ?? null,
                 it?.in_stock ?? null,
@@ -184,21 +158,17 @@ export const syncPetpoojaMenu = async () => {
                 it?.is_recommend ?? null,
                 safeJson(it?.cuisine),
                 safeJson(it?.item_tags),
-                // Insert custom_image if provided by upstream; do not overwrite on updates.
                 it?.custom_image ?? null,
             ];
 
             await connection.execute(sql, params);
-            upserted += 1;
+            upserted++;
         }
 
         await connection.commit();
 
-        return {
-            success: true,
-            itemCount: items.length,
-            upserted,
-        };
+        return { success: true, upserted };
+
     } catch (error) {
         await connection.rollback();
         throw error;
@@ -207,195 +177,67 @@ export const syncPetpoojaMenu = async () => {
     }
 };
 
-const createPetpoojaMenuMetaTable = async (connection) => {
-    await connection.execute(`
-        CREATE TABLE IF NOT EXISTS petpooja_menu_meta (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            rest_id VARCHAR(50) NULL,
-            categories_json JSON NULL,
-            addongroups_json JSON NULL,
-            addongroupitems_json JSON NULL,
-            taxes_json JSON NULL,
-            discounts_json JSON NULL,
-            updated_at TIMESTAMP
-                DEFAULT CURRENT_TIMESTAMP
-                ON UPDATE CURRENT_TIMESTAMP,
-            UNIQUE KEY uniq_rest_id (rest_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    `);
-};
-
+/* =========================
+   PUSH MENU (LIVE)
+========================= */
 export const syncPushMenuData = async (restaurant) => {
     await createMenuTable();
 
-    const restId =
-        restaurant?.rest_id ||
-        restaurant?.restID ||
-        restaurant?.restaurantid ||
-        restaurant?.restaurant_id ||
-        null;
-
-    const categories = Array.isArray(restaurant?.categories) ? restaurant.categories : [];
-    const addongroups = Array.isArray(restaurant?.addongroups) ? restaurant.addongroups : [];
-    const addongroupitems = Array.isArray(restaurant?.addongroupitems) ? restaurant.addongroupitems : [];
-    const taxes = Array.isArray(restaurant?.taxes) ? restaurant.taxes : [];
-    const discounts = Array.isArray(restaurant?.discounts) ? restaurant.discounts : [];
-
-    const rawItems = Array.isArray(restaurant?.items) ? restaurant.items : [];
-    const itemsById = new Map();
-    for (const it of rawItems) {
-        const itemid = String(it?.itemid ?? "").trim();
-        if (!itemid) continue;
-        itemsById.set(itemid, it);
-    }
-    const items = Array.from(itemsById.values());
+    const categories = restaurant?.categories || [];
+    const items = restaurant?.items || [];
 
     const connection = await pool.getConnection();
+
     try {
         await connection.beginTransaction();
 
-        await createPetpoojaMenuMetaTable(connection);
-
-        // Store menu meta as JSON for DB-first hybrid serving.
-        await connection.execute(
-            `
-            INSERT INTO petpooja_menu_meta (
-                rest_id,
-                categories_json,
-                addongroups_json,
-                addongroupitems_json,
-                taxes_json,
-                discounts_json
-            ) VALUES (?,?,?,?,?,?)
-            ON DUPLICATE KEY UPDATE
-                categories_json = VALUES(categories_json),
-                addongroups_json = VALUES(addongroups_json),
-                addongroupitems_json = VALUES(addongroupitems_json),
-                taxes_json = VALUES(taxes_json),
-                discounts_json = VALUES(discounts_json),
-                updated_at = CURRENT_TIMESTAMP
-            `,
-            [
-                restId,
-                safeJson(categories),
-                safeJson(addongroups),
-                safeJson(addongroupitems),
-                safeJson(taxes),
-                safeJson(discounts),
-            ]
-        );
-
         const sql = `
             INSERT INTO menu_items (
-                itemid,
-                itemname,
-                itemdescription,
-                price,
-                item_categoryid,
-                item_attributeid,
-                item_image_url,
-                in_stock,
-                itemallowvariation,
-                variation,
-                itemallowaddon,
-                addon,
-                is_combo,
-                is_recommend,
-                cuisine,
-                item_tags,
-                custom_image
-            ) VALUES (
-                ?,?,?,?,?,?,?,?,
-                ?,?,?,?,?,?,?,?,?
-            )
+                itemid,itemname,price,item_categoryid,
+                itemallowvariation,variation,itemallowaddon,addon
+            ) VALUES (?,?,?,?,?,?,?,?)
             ON DUPLICATE KEY UPDATE
                 itemname = VALUES(itemname),
-                itemdescription = VALUES(itemdescription),
                 price = VALUES(price),
                 item_categoryid = VALUES(item_categoryid),
-                item_attributeid = VALUES(item_attributeid),
-                item_image_url = VALUES(item_image_url),
-                in_stock = VALUES(in_stock),
                 itemallowvariation = COALESCE(VALUES(itemallowvariation), itemallowvariation),
                 variation = COALESCE(VALUES(variation), variation),
                 itemallowaddon = COALESCE(VALUES(itemallowaddon), itemallowaddon),
                 addon = COALESCE(VALUES(addon), addon),
-                is_combo = VALUES(is_combo),
-                is_recommend = VALUES(is_recommend),
-                cuisine = VALUES(cuisine),
-                item_tags = VALUES(item_tags),
                 updated_at = CURRENT_TIMESTAMP
         `;
-
-        let upserted = 0;
 
         for (const it of items) {
             const itemid = String(it?.itemid ?? "").trim();
             if (!itemid) continue;
 
-            const itemCategoryId =
-                it?.item_categoryid ||
-                it?.categoryid ||
-                it?.categoryId ||
-                null;
+            const price =
+                Number(it?.price) > 0
+                    ? Number(it.price)
+                    : (it?.child_variations?.[0]?.price || 0);
 
-            // IMPORTANT: Ignore deprecated `variation`; prefer `child_variations`.
-            const childVariations = it?.child_variations ?? null;
-            const hasVariations = Array.isArray(childVariations) && childVariations.length > 0;
-
-            // PRICE FIX (CRITICAL): prefer item price if >0; else fall back to first child variation price.
-            const price = Number(it?.price) > 0
-                ? Number(it.price)
-                : (it?.child_variations?.[0]?.price || 0);
-
-            // Add-on mapping differs across payloads; store whatever linkage we receive.
-            const addonPayload =
-                it?.addongroups ??
-                it?.addon_groups ??
-                it?.addon_group_ids ??
-                it?.addongroupids ??
-                it?.addon ??
-                it?.addons ??
-                null;
-
-            const hasAddons = addonPayload !== null && addonPayload !== undefined;
-
-            const params = [
+            await connection.execute(sql, [
                 itemid,
-                it?.itemname ?? null,
-                it?.itemdescription ?? null,
-                toDecimal(price),
-                itemCategoryId,
-                it?.item_attributeid ?? null,
-                it?.item_image_url ?? null,
-                it?.in_stock ?? null,
-                hasVariations ? 1 : (it?.itemallowvariation ?? null),
-                safeJson(childVariations),
-                hasAddons ? 1 : (it?.itemallowaddon ?? null),
-                safeJson(addonPayload),
-                it?.is_combo ?? null,
-                it?.is_recommend ?? null,
-                safeJson(it?.cuisine),
-                safeJson(it?.item_tags),
-                // Preserve custom_image on updates (no UPDATE clause for custom_image).
-                it?.custom_image ?? null,
-            ];
-
-            console.log("SAVE ITEM:", {
-                name: it.itemname,
-                incoming_categoryid: it.categoryid,
-                saved_categoryid: itemCategoryId,
-            });
-
-            await connection.execute(sql, params);
-            upserted += 1;
+                it?.itemname,
+                price,
+                it?.categoryid,
+                it?.child_variations ? 1 : 0,
+                safeJson(it?.child_variations),
+                it?.addons ? 1 : 0,
+                safeJson(it?.addons),
+            ]);
         }
 
         await connection.commit();
-        return { success: true, itemCount: rawItems.length, upserted };
-    } catch (error) {
+
+        console.log("✅ PUSH MENU SAVED:", items.length);
+
+        return { success: true };
+
+    } catch (err) {
         await connection.rollback();
-        throw error;
+        console.error("❌ PUSH ERROR:", err);
+        throw err;
     } finally {
         connection.release();
     }

@@ -13,15 +13,25 @@ import {
 
 const router = express.Router();
 
-// router.get("/menu", testMenu);
+// ================= MENU =================
 router.get("/menu", menu);
+
+// ================= PUSH MENU =================
 router.post("/pushmenu", pushMenu);
-router.post("/save-order", createOrder);
-router.post("/order-callback", orderCallback);
-router.post("/cancel-order", cancelOrder);
-router.post("/store-status", storeStatus);
+
+// ================= ORDER =================
+router.post("/save_order", createOrder); // ✅ FIXED
+router.post("/order_callback", orderCallback); // ✅ FIXED
+router.post("/cancel_order", cancelOrder);
+
+// ================= STORE =================
+router.post("/store_status", storeStatus);
 router.post("/update_store_status", updateStoreStatus);
+
+// ================= STOCK =================
 router.post("/item_stock", updateItemStock);
-router.post("/reset-menu", resetMenu);
+
+// ================= ADMIN =================
+router.post("/reset_menu", resetMenu);
 
 export default router;

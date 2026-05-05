@@ -5,378 +5,102 @@ import redisClient, { isRedisEnabled } from "../../config/redis.js";
 import { getAllDishImages } from "../admin/admin.model.js";
 import { createCategoryTable } from "../menu/menu.category.model.js";
 import { createMenuTable } from "../menu/menu.model.js";
-import { downloadMenuItemImage } from "./petpooja.image.utils.js";
 
 const FALLBACK_IMAGE = "/images/food-placeholder.jpg";
-const CACHE_TTL_MS = 30 * 60 * 1000;
 const REDIS_MENU_KEY = "petpooja:menu";
-const REDIS_MENU_TTL_SECONDS = 5 * 60;
-let cachedMenu = null;
-let cachedAtMs = 0;
-let inFlightPromise = null;
 
+let cachedMenu = null;
+
+
+// ================= CACHE =================
 export const invalidatePetpoojaMenuCache = () => {
     cachedMenu = null;
-    cachedAtMs = 0;
-    inFlightPromise = null;
 };
 
-const normalizeItems = (menu) => {
-    const items = safeArray(menu?.items);
 
-    const normalized = items.map((item) => ({
-        ...item,
-        description: item.itemdescription || item.description || "",
-    }));
-
-    return {
-        ...menu,
-        items: normalized,
-    };
-};
-
+// ================= SAFE ARRAY =================
 const safeArray = (v) => (Array.isArray(v) ? v : []);
 
-const mapLimit = async (list, limit, mapper) => {
-    const arr = safeArray(list);
-    const results = new Array(arr.length);
-    let idx = 0;
 
-    const workers = Array.from({ length: Math.max(1, limit) }, async () => {
-        while (idx < arr.length) {
-            const current = idx++;
-            results[current] = await mapper(arr[current], current);
-        }
-    });
-
-    await Promise.all(workers);
-    return results;
-};
-
-const enrichMenuWithLocalImages = async (menu) => {
-    const items = safeArray(menu?.items);
-    if (items.length === 0) return menu;
-
-    const enrichedItems = await mapLimit(items, 6, async (item) => {
-        const itemId = item?.itemid ?? item?.id;
-        const url = item?.item_image_url;
-
-        if (!itemId || !url) {
-            return { ...item, local_image: FALLBACK_IMAGE };
-        }
-
-        const dl = await downloadMenuItemImage({ itemId, url });
-        if (dl?.error) {
-            console.warn(`Petpooja image download failed for item ${itemId}: ${dl.error}`);
-        }
-
-        const local = dl?.local_image || null;
-        if (!local) {
-            return {
-                ...item,
-                local_image: FALLBACK_IMAGE,
-            };
-        }
-        return {
-            ...item,
-            local_image: local,
-            item_image_url: local || item?.item_image_url || null,
-        };
-    });
-
-    return {
-        ...menu,
-        items: enrichedItems,
-    };
-};
-
+// ================= APPLY CUSTOM IMAGES =================
 const applyCustomDishImages = async (menu) => {
     const items = safeArray(menu?.items);
-    if (items.length === 0) return menu;
+    if (!items.length) return menu;
 
     const dbImages = await getAllDishImages();
-    if (!Array.isArray(dbImages) || dbImages.length === 0) return menu;
+    if (!dbImages?.length) return menu;
 
-    const imageMap = new Map();
+    const map = new Map();
+
     for (const img of dbImages) {
-        const key = String(img?.itemid ?? "").trim();
-        const value = String(img?.image ?? "").trim();
-        const updatedAt = img?.updated_at;
-        if (key && value) imageMap.set(key, { image: value, updated_at: updatedAt });
+        map.set(String(img.itemid), {
+            image: img.image,
+            updated_at: img.updated_at
+        });
     }
-    if (imageMap.size === 0) return menu;
 
-    const enrichedItems = items.map((item) => {
-        const itemId = String(item?.itemid ?? item?.id ?? "").trim();
-        const mapped = imageMap.get(itemId) || null;
-        if (!mapped?.image) {
-            // Preserve any existing custom_image present in DB snapshots.
-            const existing = String(item?.custom_image ?? "").trim();
-            return existing ? { ...item, custom_image: existing } : item;
-        }
+    const updatedItems = items.map((item) => {
+        const id = String(item.itemid || item.id || "");
 
-        const customImage = mapped.image;
-        const image_updated_at = mapped.updated_at;
+        const found = map.get(id);
 
-        const merged = {
+        if (!found) return item;
+
+        return {
             ...item,
-            custom_image: customImage,
-            image: customImage,
-            // Also override common fields for compatibility with existing consumers.
-            item_image_url: customImage,
-            local_image: customImage,
-            // IMPORTANT
-            image_updated_at,
+            custom_image: found.image,
+            image: found.image,
+            item_image_url: found.image,
+            local_image: found.image,
+            image_updated_at: found.updated_at
         };
-
-        // Temporary debug
-        console.log(item.id ?? item.itemid, merged.image_updated_at);
-        return merged;
     });
 
     return {
         ...menu,
-        items: enrichedItems,
+        items: updatedItems
     };
 };
 
-const fetchMenuFromPetpooja = async () => {
-    const response = await axios.post(
-        // `${config.baseUrl}/mapped_restaurant_menus`,
-        `${config.menuBaseUrl}/mapped_restaurant_menus`,
-        {
-            restID: config.restId,
-        },
-        {
-            headers: {
-                "Content-Type": "application/json",
-                "app-key": config.appKey,
-                "app-secret": config.appSecret,
-                "access-token": config.accessToken,
-            },
-        },
-    );
 
-    return response.data;
-};
-
-const readMenuFromRedis = async () => {
-    if (!isRedisEnabled()) return null;
-
-    try {
-        const cached = await redisClient.get(REDIS_MENU_KEY);
-        if (!cached) return null;
-        return JSON.parse(cached);
-    } catch (error) {
-        console.warn("[Petpooja] Redis cache read failed:", error?.message || error);
-        return null;
-    }
-};
-
-const writeMenuToRedis = async (menu) => {
-    if (!isRedisEnabled()) return;
-
-    try {
-        await redisClient.set(REDIS_MENU_KEY, JSON.stringify(menu), {
-            EX: REDIS_MENU_TTL_SECONDS,
-        });
-        console.log("[Petpooja] Redis cache updated");
-    } catch (error) {
-        console.warn("[Petpooja] Redis cache write failed:", error?.message || error);
-    }
-};
-
-export const updatePetpoojaMenuRedisCache = async (menu) => {
-    cachedMenu = menu;
-    cachedAtMs = Date.now();
-    await writeMenuToRedis(menu);
-};
-
-const safeJsonParse = (value) => {
-    if (value === null || value === undefined) return null;
-    if (typeof value !== "string") return value;
-
-    const trimmed = value.trim();
-    if (!trimmed) return null;
-    if (!(trimmed.startsWith("{") || trimmed.startsWith("["))) return value;
-
-    try {
-        return JSON.parse(trimmed);
-    } catch {
-        return value;
-    }
-};
-
-const readMenuMetaFromDb = async () => {
-    try {
-        const [rows] = await pool.execute(
-            `SELECT categories_json, taxes_json, discounts_json, addongroups_json, addongroupitems_json
-             FROM petpooja_menu_meta
-             ORDER BY updated_at DESC
-             LIMIT 1`
-        );
-        const row = Array.isArray(rows) ? rows[0] : null;
-        if (!row) return null;
-
-        return {
-            categories: safeJsonParse(row.categories_json) || [],
-            taxes: safeJsonParse(row.taxes_json) || [],
-            discounts: safeJsonParse(row.discounts_json) || [],
-            addongroups: safeJsonParse(row.addongroups_json) || [],
-            addongroupitems: safeJsonParse(row.addongroupitems_json) || [],
-        };
-    } catch {
-        return null;
-    }
-};
-
+// ================= DB READ =================
 const readMenuFromDb = async () => {
     try {
         await createMenuTable();
 
-        const [rows] = await pool.execute(
-            `SELECT 
-                itemid,
-                itemname,
-                itemdescription,
-                price,
-                item_categoryid,
-                item_attributeid,
-                item_image_url,
-                in_stock,
-                itemallowvariation,
-                variation,
-                itemallowaddon,
-                addon,
-                is_combo,
-                is_recommend,
-                cuisine,
-                item_tags,
-                custom_image
-            FROM menu_items`
-        );
+        const [rows] = await pool.execute(`SELECT * FROM menu_items`);
 
-        const items = Array.isArray(rows)
-            ? rows.map((r) => ({
-                ...r,
-                variation: safeJsonParse(r.variation),
-                addon: safeJsonParse(r.addon),
-                cuisine: safeJsonParse(r.cuisine),
-                item_tags: safeJsonParse(r.item_tags),
-            }))
-            : [];
+        if (!rows.length) return null;
 
-        if (!items.length) return null;
-
-        const meta = await readMenuMetaFromDb();
-
-        let categories = Array.isArray(meta?.categories) ? meta.categories : [];
-        if (!categories || categories.length === 0) {
-            try {
-                await createCategoryTable();
-                const [catRows] = await pool.execute(
-                    `SELECT categoryid, categoryname FROM menu_categories ORDER BY updated_at DESC`
-                );
-                categories = Array.isArray(catRows) ? catRows : [];
-            } catch (error) {
-                console.warn(
-                    "[Petpooja] menu_categories fallback read failed:",
-                    error?.message || error
-                );
-                categories = [];
-            }
-        }
+        await createCategoryTable();
+        const [cats] = await pool.execute(`SELECT * FROM menu_categories`);
 
         return {
-            categories,
-            items,
-            taxes: meta?.taxes || [],
-            discounts: meta?.discounts || [],
-            addongroups: meta?.addongroups || [],
-            addongroupitems: meta?.addongroupitems || [],
+            categories: cats || [],
+            items: rows || [],
+            taxes: [],
+            discounts: [],
+            addongroups: [],
+            addongroupitems: []
         };
-    } catch (error) {
-        console.warn("[Petpooja] DB menu read failed:", error?.message || error);
+
+    } catch (err) {
+        console.log("DB read error:", err.message);
         return null;
     }
 };
 
-export const processIncomingPetpoojaMenu = async (menu) => {
-    const normalized = normalizeItems(menu);
-    const enriched = await enrichMenuWithLocalImages(normalized);
-    const withCustomImages = await applyCustomDishImages(enriched);
-    return withCustomImages;
-};
 
-export const fetchPetpoojaMenuFresh = async () => {
-    const menu = await fetchMenuFromPetpooja();
-    const withCustomImages = await processIncomingPetpoojaMenu(menu);
-
-    cachedMenu = withCustomImages;
-    cachedAtMs = Date.now();
-
-    await writeMenuToRedis(withCustomImages);
-    return withCustomImages;
-};
-
-
-// export const getTestMenu = async () => {
-//     // Hybrid mode: if DB has menu data, serve from DB.
-//     const fromDb = await readMenuFromDb();
-//     if (fromDb) {
-//         cachedMenu = fromDb;
-//         cachedAtMs = Date.now();
-//         await writeMenuToRedis(fromDb);
-//         return fromDb;
-//     }
-
-//     // Redis-first: if we have a cached menu, return immediately.
-//     const fromRedis = await readMenuFromRedis();
-//     if (fromRedis) {
-//         cachedMenu = fromRedis;
-//         cachedAtMs = Date.now();
-//         return fromRedis;
-//     }
-
-//     const now = Date.now();
-//     // if (cachedMenu && now - cachedAtMs < CACHE_TTL_MS) return cachedMenu;
-
-//     // if (inFlightPromise) return inFlightPromise;
-
-//     inFlightPromise = (async () => {
-//         // const fresh = await fetchPetpoojaMenuFresh();
-//         // return fresh;
-//         return {
-//             categories: [],
-//             items: [],
-//             taxes: [],
-//             discounts: [],
-//             addongroups: [],
-//             addongroupitems: []
-//         };
-//     })().finally(() => {
-//         inFlightPromise = null;
-//     });
-
-//     return inFlightPromise;
-// };
-
-
+// ================= MAIN MENU =================
 export const getTestMenu = async () => {
 
-    // 1. DB check
-    const fromDb = await readMenuFromDb();
-    if (fromDb) {
-        return await applyCustomDishImages(fromDb);
+    // 🔥 ONLY DB MODE (IMPORTANT)
+    const dbMenu = await readMenuFromDb();
+
+    if (dbMenu) {
+        return await applyCustomDishImages(dbMenu);
     }
 
-    // 2. Redis check
-    // const fromRedis = await readMenuFromRedis();
-    // if (fromRedis) {
-    //     return fromRedis;
-    // }
-
-    // 3. FINAL → EMPTY (NO AUTO FETCH)
     return {
         categories: [],
         items: [],
@@ -387,19 +111,31 @@ export const getTestMenu = async () => {
     };
 };
 
+
+// ================= REDIS CACHE =================
+export const updatePetpoojaMenuRedisCache = async (menu) => {
+    cachedMenu = menu;
+
+    if (!isRedisEnabled()) return;
+
+    try {
+        await redisClient.set(REDIS_MENU_KEY, JSON.stringify(menu));
+        console.log("Redis updated");
+    } catch (e) {
+        console.log("Redis error:", e.message);
+    }
+};
+
+
+// ================= RESET =================
 export const hardResetMenu = async () => {
     cachedMenu = null;
-    cachedAtMs = 0;
-    inFlightPromise = null;
 
     if (isRedisEnabled()) {
         try {
-            await redisClient.del("petpooja:menu");
-            console.log("Redis cleared");
+            await redisClient.del(REDIS_MENU_KEY);
         } catch (e) {
-            console.log("Redis error:", e.message);
+            console.log("Redis delete error:", e.message);
         }
     }
-
-    console.log("Memory cache cleared");
 };

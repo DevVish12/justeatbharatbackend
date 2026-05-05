@@ -6,6 +6,8 @@ import {
     petpoojaOrderClient
 } from "./petpooja.utils.js";
 
+
+// ================= VALIDATION =================
 const badRequest = (message, details) => {
     const error = new Error(message);
     error.statusCode = 400;
@@ -15,13 +17,10 @@ const badRequest = (message, details) => {
 
 const validateSaveOrderPayload = (payload) => {
     if (!payload || typeof payload !== "object") {
-        throw badRequest("Invalid request body", {
-            expected: "JSON object",
-        });
+        throw badRequest("Invalid request body");
     }
 
-    const missing = [];
-    const requiredFields = [
+    const required = [
         "orderID",
         "name",
         "phone",
@@ -34,68 +33,38 @@ const validateSaveOrderPayload = (payload) => {
         "order_items",
     ];
 
-    for (const field of requiredFields) {
-        if (payload[field] === undefined || payload[field] === null || payload[field] === "") {
-            missing.push(field);
-        }
-    }
+    const missing = required.filter(f => !payload[f]);
 
-    if (!Array.isArray(payload.order_items) || payload.order_items.length === 0) {
-        missing.push("order_items[]");
-    }
-
-    if (Array.isArray(payload.order_items)) {
-        const itemMissing = new Set();
-        for (const item of payload.order_items) {
-            if (!item || typeof item !== "object") {
-                itemMissing.add("order_items[].{id,name,price,quantity}");
-                continue;
-            }
-            if (!item.id) itemMissing.add("order_items[].id");
-            if (!item.name) itemMissing.add("order_items[].name");
-            if (item.price === undefined || item.price === null || item.price === "") {
-                itemMissing.add("order_items[].price");
-            }
-            if (item.quantity === undefined || item.quantity === null || item.quantity === "") {
-                itemMissing.add("order_items[].quantity");
-            }
-        }
-        missing.push(...itemMissing);
-    }
-
-    if (missing.length > 0) {
-        throw badRequest("Missing/invalid fields for Petpooja save_order", {
-            missing: [...new Set(missing)],
-        });
+    if (missing.length) {
+        throw badRequest("Missing fields", { missing });
     }
 };
 
 
+// ================= SEND ORDER =================
 export const sendOrderToPetpooja = async (payload) => {
 
     assertPetpoojaConfigured();
-
     validateSaveOrderPayload(payload);
 
-    // 🔹 Auto fill required fields if missing
     const now = new Date();
 
-    const preorderDate = now.toISOString().slice(0, 10); // YYYY-MM-DD
-    const preorderTime = now.toTimeString().slice(0, 8); // HH:MM:SS
-
-    payload.preorder_date = payload.preorder_date || preorderDate;
-    payload.preorder_time = payload.preorder_time || preorderTime;
-    payload.advanced_order = payload.advanced_order || "N";
-
-    payload.dc_tax_percentage = payload.dc_tax_percentage || "0";
-    payload.pc_tax_percentage = payload.pc_tax_percentage || "0";
-
-    payload.enable_delivery = payload.enable_delivery || "1";
+    const finalPayload = {
+        ...payload,
+        preorder_date: payload.preorder_date || now.toISOString().slice(0, 10),
+        preorder_time: payload.preorder_time || now.toTimeString().slice(0, 8),
+        advanced_order: payload.advanced_order || "N",
+        dc_tax_percentage: payload.dc_tax_percentage || "0",
+        pc_tax_percentage: payload.pc_tax_percentage || "0",
+        enable_delivery: payload.enable_delivery || "1",
+    };
 
     const orderPayload = {
-        app_key: petpoojaConfig.appKey,
-        app_secret: petpoojaConfig.appSecret,
-        access_token: petpoojaConfig.accessToken,
+
+        // ❗ REMOVE FROM BODY (IMPORTANT)
+        // app_key
+        // app_secret
+        // access_token
 
         orderinfo: {
             OrderInfo: {
@@ -108,47 +77,47 @@ export const sendOrderToPetpooja = async (payload) => {
 
                 Customer: {
                     details: {
-                        name: payload.name,
-                        phone: payload.phone,
-                        address: payload.address
+                        name: finalPayload.name,
+                        phone: finalPayload.phone,
+                        address: finalPayload.address
                     }
                 },
 
                 Order: {
                     details: {
-                        orderID: payload.orderID,
-                        preorder_date: payload.preorder_date,
-                        preorder_time: payload.preorder_time,
-                        advanced_order: payload.advanced_order,
-                        order_type: payload.order_type,
-                        payment_type: payload.payment_type,
-                        total: payload.total,
-                        tax_total: payload.tax_total,
-                        created_on: payload.created_on,
-                        dc_tax_percentage: payload.dc_tax_percentage,
-                        pc_tax_percentage: payload.pc_tax_percentage,
-                        enable_delivery: payload.enable_delivery,
+                        orderID: finalPayload.orderID,
+                        preorder_date: finalPayload.preorder_date,
+                        preorder_time: finalPayload.preorder_time,
+                        advanced_order: finalPayload.advanced_order,
+                        order_type: finalPayload.order_type,
+                        payment_type: finalPayload.payment_type,
+                        total: String(finalPayload.total),
+                        tax_total: String(finalPayload.tax_total),
+                        created_on: finalPayload.created_on,
+                        dc_tax_percentage: finalPayload.dc_tax_percentage,
+                        pc_tax_percentage: finalPayload.pc_tax_percentage,
+                        enable_delivery: finalPayload.enable_delivery,
 
-                        // 🔥 ADD THESE (VERY IMPORTANT)
-                        min_prep_time: payload.min_prep_time || 20,
+                        min_prep_time: finalPayload.min_prep_time || 20,
+
                         collect_cash:
-                            payload.payment_type === "COD"
-                                ? payload.total
+                            finalPayload.payment_type === "COD"
+                                ? String(finalPayload.total)
                                 : "0",
 
-                        description: payload.description || "",
+                        description: finalPayload.description || "",
                         callback_url: petpoojaConfig.callbackUrl
                     }
                 },
 
                 OrderItem: {
-                    details: payload.order_items.map(item => ({
+                    details: finalPayload.order_items.map(item => ({
                         id: item.id,
                         name: item.name,
-                        price: item.price,
-                        final_price: item.final_price || item.price,
-                        quantity: item.quantity,
-                        gst_liability: item.gst_liability || "restaurant",
+                        price: String(item.price),
+                        final_price: String(item.final_price || item.price),
+                        quantity: String(item.quantity),
+                        gst_liability: "restaurant",
                         tax_inclusive: true,
                         item_tax: [],
                         variation_name: "",
@@ -158,7 +127,7 @@ export const sendOrderToPetpooja = async (payload) => {
                 },
 
                 Tax: {
-                    details: payload.tax_details || []
+                    details: finalPayload.tax_details || []
                 }
 
             },
@@ -167,11 +136,6 @@ export const sendOrderToPetpooja = async (payload) => {
         }
     };
 
-    // if (!orderPayload.restID) {
-    //     throw badRequest("Missing restID (PETPOOJA_REST_ID)");
-    // }
-
-    // 🔴 YAHAN ADD KARNA HAI
     console.log("FINAL ORDER PAYLOAD", orderPayload);
 
     const response = await petpoojaOrderClient.post(
@@ -180,21 +144,19 @@ export const sendOrderToPetpooja = async (payload) => {
     );
 
     return response.data;
-
 };
 
 
-
+// ================= CANCEL ORDER =================
 export const cancelPetpoojaOrder = async (data) => {
     try {
         const response = await axios.post(
-            "https://qle1yy2ydc.execute-api.ap-southeast-1.amazonaws.com/V1/update_order_status",
+            `${petpoojaConfig.orderBaseUrl}/update_order_status`, // ✅ FIXED
             {
-                app_key: process.env.PETPOOJA_APP_KEY,
-                app_secret: process.env.PETPOOJA_APP_SECRET,
-                access_token: process.env.PETPOOJA_ACCESS_TOKEN,
-                restID: data.restID,
-                orderID: "", // optional
+                app_key: petpoojaConfig.appKey,
+                app_secret: petpoojaConfig.appSecret,
+                access_token: petpoojaConfig.accessToken,
+                restID: petpoojaConfig.restId,
                 clientorderID: data.clientorderID,
                 cancelReason: data.reason,
                 status: "-1"
@@ -204,7 +166,7 @@ export const cancelPetpoojaOrder = async (data) => {
         return response.data;
 
     } catch (error) {
-        console.error("Cancel order error:", error.response?.data || error.message);
+        console.error("Cancel error:", error.response?.data || error.message);
         throw error;
     }
 };
