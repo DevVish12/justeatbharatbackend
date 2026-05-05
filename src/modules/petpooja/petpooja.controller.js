@@ -4,7 +4,6 @@ import {
     getTestMenu,
     hardResetMenu,
     invalidatePetpoojaMenuCache,
-    processIncomingPetpoojaMenu,
     updatePetpoojaMenuRedisCache,
 } from "./petpooja.menu.service.js";
 
@@ -106,7 +105,7 @@ export const updateStoreStatus = async (req, res) => {
 };
 
 
-// ================= 🔥 PUSH MENU (FIXED CORE ISSUE) =================
+// ================= 🔥 PUSH MENU (FINAL FIX) =================
 export const pushMenu = async (req, res) => {
     console.log("PUSH MENU RECEIVED", JSON.stringify(req.body, null, 2));
 
@@ -126,7 +125,7 @@ export const pushMenu = async (req, res) => {
         console.log("CATEGORIES:", categories.length);
         console.log("ITEMS:", items.length);
 
-        // ❗ VERY IMPORTANT → ALWAYS RETURN "0"
+        // ❗ Petpooja requirement → always return "0"
         if (!categories.length || !items.length) {
             return res.status(200).send("0");
         }
@@ -149,32 +148,28 @@ export const pushMenu = async (req, res) => {
             await pool.execute(upsertSql, [id, name]);
         }
 
-        // ===== SAVE MENU =====
+        // ===== SAVE MENU (FIXED) =====
         const restaurantForSync = {
             ...restaurant,
             categories,
             items,
         };
 
-        const processedMenu = await processIncomingPetpoojaMenu(restaurantForSync);
-        await syncPushMenuData(processedMenu);
+        await syncPushMenuData(restaurantForSync);
 
         // ===== CACHE =====
         invalidatePetpoojaMenuCache();
 
         try {
-            await updatePetpoojaMenuRedisCache(processedMenu);
+            await updatePetpoojaMenuRedisCache(await getTestMenu());
         } catch (e) {
             console.log("Redis skipped:", e.message);
         }
 
-        // ✅ SUCCESS (CRITICAL)
         return res.status(200).send("0");
 
     } catch (error) {
         console.error("PUSH MENU ERROR:", error);
-
-        // ❗ EVEN ERROR → SEND "0"
         return res.status(200).send("0");
     }
 };
@@ -183,7 +178,7 @@ export const pushMenu = async (req, res) => {
 // ================= STOCK UPDATE =================
 export const updateItemStock = async (req, res) => {
     try {
-        const { restID, inStock, type, itemID } = req.body;
+        const { restID, inStock, itemID } = req.body;
 
         if (!restID || !Array.isArray(itemID)) {
             return res.status(400).json({
