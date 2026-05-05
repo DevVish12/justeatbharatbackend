@@ -141,26 +141,44 @@ export const syncPetpoojaMenu = async () => {
             const itemid = String(it?.itemid ?? "").trim();
             if (!itemid) continue;
 
-            const params = [
-                itemid,
-                it?.itemname ?? null,
-                it?.itemdescription ?? null,
-                toDecimal(it?.price),
-                it?.categoryid ?? null,
-                it?.item_attributeid ?? null,
-                it?.item_image_url ?? null,
-                it?.in_stock ?? null,
-                it?.itemallowvariation ?? null,
-                safeJson(it?.variation),
-                it?.itemallowaddon ?? null,
-                safeJson(it?.addon),
-                it?.is_combo ?? null,
-                it?.is_recommend ?? null,
-                safeJson(it?.cuisine),
-                safeJson(it?.item_tags),
-                it?.custom_image ?? null,
-            ];
-
+            // const params = [
+            //     itemid,
+            //     it?.itemname ?? null,
+            //     it?.itemdescription ?? null,
+            //     toDecimal(it?.price),
+            //     it?.categoryid ?? null,
+            //     it?.item_attributeid ?? null,
+            //     it?.item_image_url ?? null,
+            //     it?.in_stock ?? null,
+            //     it?.itemallowvariation ?? null,
+            //     safeJson(it?.variation),
+            //     it?.itemallowaddon ?? null,
+            //     safeJson(it?.addon),
+            //     it?.is_combo ?? null,
+            //     it?.is_recommend ?? null,
+            //     safeJson(it?.cuisine),
+            //     safeJson(it?.item_tags),
+            //     it?.custom_image ?? null,
+            // ];
+const params = [
+    itemid || null,
+    it?.itemname || null,
+    it?.itemdescription || null,
+    toDecimal(price) || 0,
+    itemCategoryId || null,
+    it?.item_attributeid || null,
+    it?.item_image_url || null,
+    it?.in_stock ?? 2,
+    hasVariations ? 1 : (it?.itemallowvariation ?? 0),
+    safeJson(childVariations) || null,
+    hasAddons ? 1 : (it?.itemallowaddon ?? 0),
+    safeJson(addonPayload) || null,
+    it?.is_combo ?? 0,
+    it?.is_recommend ?? 0,
+    safeJson(it?.cuisine) || null,
+    safeJson(it?.item_tags) || null,
+    it?.custom_image || null,
+];
             await connection.execute(sql, params);
             upserted++;
         }
