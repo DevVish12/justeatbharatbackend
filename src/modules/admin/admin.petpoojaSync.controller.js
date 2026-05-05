@@ -15,19 +15,11 @@
 //     }
 // };
 
-
-// ❌ REMOVE OLD IMPORT
-// import { syncPetpoojaMenu } from "../petpooja/petpooja.sync.service.js";
-
-// ✅ SAFE DUMMY FUNCTION (PUSH MODE)
-const syncPetpoojaMenu = async () => {
-    console.log("⚠️ Manual sync disabled (PUSH mode)");
-    return { success: true };
-};
+// ✅ PUSH MODE - NO MANUAL SYNC
 
 export const syncPetpoojaMenuController = async (req, res) => {
     try {
-        await syncPetpoojaMenu();
+        console.log("⚠️ Manual sync disabled (PUSH mode)");
 
         return res.status(200).json({
             success: true,
