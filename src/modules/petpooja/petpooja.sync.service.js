@@ -71,18 +71,6 @@ export const startPetpoojaMenuAutoSync = () => {
 const safeJson = (value) => {
     if (value === undefined || value === null) return null;
 
-    if (typeof value === "string") {
-        const trimmed = value.trim();
-        if (!trimmed) return null;
-
-        try {
-            JSON.parse(trimmed);
-            return trimmed;
-        } catch {
-            return JSON.stringify(trimmed);
-        }
-    }
-
     try {
         return JSON.stringify(value);
     } catch {
@@ -92,117 +80,18 @@ const safeJson = (value) => {
 
 const toDecimal = (value) => {
     const n = Number.parseFloat(String(value ?? "").trim());
-    return Number.isFinite(n) ? n : null;
+    return Number.isFinite(n) ? n : 0;
 };
 
 /* =========================
-   NORMAL MENU SYNC
-========================= */
-export const syncPetpoojaMenu = async () => {
-    await createMenuTable();
-
-    const menu = await getTestMenu();
-    const items = Array.isArray(menu?.items) ? menu.items : [];
-
-    const connection = await pool.getConnection();
-
-    try {
-        await connection.beginTransaction();
-
-        const sql = `
-            INSERT INTO menu_items (
-                itemid,itemname,itemdescription,price,item_categoryid,
-                item_attributeid,item_image_url,in_stock,
-                itemallowvariation,variation,itemallowaddon,addon,
-                is_combo,is_recommend,cuisine,item_tags,custom_image
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            ON DUPLICATE KEY UPDATE
-                itemname = VALUES(itemname),
-                itemdescription = VALUES(itemdescription),
-                price = VALUES(price),
-                item_categoryid = VALUES(item_categoryid),
-                item_image_url = VALUES(item_image_url),
-                in_stock = VALUES(in_stock),
-                itemallowvariation = VALUES(itemallowvariation),
-                variation = VALUES(variation),
-                itemallowaddon = VALUES(itemallowaddon),
-                addon = VALUES(addon),
-                is_combo = VALUES(is_combo),
-                is_recommend = VALUES(is_recommend),
-                cuisine = VALUES(cuisine),
-                item_tags = VALUES(item_tags),
-                custom_image = COALESCE(VALUES(custom_image), custom_image),
-                updated_at = CURRENT_TIMESTAMP
-        `;
-
-        let upserted = 0;
-
-        for (const it of items) {
-            const itemid = String(it?.itemid ?? "").trim();
-            if (!itemid) continue;
-
-            // const params = [
-            //     itemid,
-            //     it?.itemname ?? null,
-            //     it?.itemdescription ?? null,
-            //     toDecimal(it?.price),
-            //     it?.categoryid ?? null,
-            //     it?.item_attributeid ?? null,
-            //     it?.item_image_url ?? null,
-            //     it?.in_stock ?? null,
-            //     it?.itemallowvariation ?? null,
-            //     safeJson(it?.variation),
-            //     it?.itemallowaddon ?? null,
-            //     safeJson(it?.addon),
-            //     it?.is_combo ?? null,
-            //     it?.is_recommend ?? null,
-            //     safeJson(it?.cuisine),
-            //     safeJson(it?.item_tags),
-            //     it?.custom_image ?? null,
-            // ];
-const params = [
-    itemid || null,
-    it?.itemname || null,
-    it?.itemdescription || null,
-    toDecimal(price) || 0,
-    itemCategoryId || null,
-    it?.item_attributeid || null,
-    it?.item_image_url || null,
-    it?.in_stock ?? 2,
-    hasVariations ? 1 : (it?.itemallowvariation ?? 0),
-    safeJson(childVariations) || null,
-    hasAddons ? 1 : (it?.itemallowaddon ?? 0),
-    safeJson(addonPayload) || null,
-    it?.is_combo ?? 0,
-    it?.is_recommend ?? 0,
-    safeJson(it?.cuisine) || null,
-    safeJson(it?.item_tags) || null,
-    it?.custom_image || null,
-];
-            await connection.execute(sql, params);
-            upserted++;
-        }
-
-        await connection.commit();
-
-        return { success: true, upserted };
-
-    } catch (error) {
-        await connection.rollback();
-        throw error;
-    } finally {
-        connection.release();
-    }
-};
-
-/* =========================
-   PUSH MENU (LIVE)
+   PUSH MENU (MAIN FIX)
 ========================= */
 export const syncPushMenuData = async (restaurant) => {
     await createMenuTable();
 
-    const categories = restaurant?.categories || [];
-    const items = restaurant?.items || [];
+    const items = Array.isArray(restaurant?.items)
+        ? restaurant.items
+        : [];
 
     const connection = await pool.getConnection();
 
@@ -211,50 +100,91 @@ export const syncPushMenuData = async (restaurant) => {
 
         const sql = `
             INSERT INTO menu_items (
-                itemid,itemname,price,item_categoryid,
-                itemallowvariation,variation,itemallowaddon,addon
-            ) VALUES (?,?,?,?,?,?,?,?)
+                itemid,
+                itemname,
+                itemdescription,
+                price,
+                item_categoryid,
+                itemallowvariation,
+                variation,
+                itemallowaddon,
+                addon,
+                in_stock
+            ) VALUES (?,?,?,?,?,?,?,?,?,?)
             ON DUPLICATE KEY UPDATE
                 itemname = VALUES(itemname),
                 price = VALUES(price),
                 item_categoryid = VALUES(item_categoryid),
-                itemallowvariation = COALESCE(VALUES(itemallowvariation), itemallowvariation),
-                variation = COALESCE(VALUES(variation), variation),
-                itemallowaddon = COALESCE(VALUES(itemallowaddon), itemallowaddon),
-                addon = COALESCE(VALUES(addon), addon),
+                itemallowvariation = VALUES(itemallowvariation),
+                variation = VALUES(variation),
+                itemallowaddon = VALUES(itemallowaddon),
+                addon = VALUES(addon),
+                in_stock = VALUES(in_stock),
                 updated_at = CURRENT_TIMESTAMP
         `;
+
+        let count = 0;
 
         for (const it of items) {
             const itemid = String(it?.itemid ?? "").trim();
             if (!itemid) continue;
 
+            // ✅ CATEGORY
+            const categoryId =
+                it?.categoryid ||
+                it?.item_categoryid ||
+                null;
+
+            // ✅ VARIATION
+            const childVariations = it?.child_variations || null;
+            const hasVariation =
+                Array.isArray(childVariations) &&
+                childVariations.length > 0;
+
+            // ✅ ADDONS
+            const addonPayload =
+                it?.addongroups ||
+                it?.addon_groups ||
+                it?.addons ||
+                it?.addon ||
+                null;
+
+            const hasAddon = addonPayload !== null;
+
+            // ✅ PRICE FIX (MOST IMPORTANT)
             const price =
                 Number(it?.price) > 0
                     ? Number(it.price)
-                    : (it?.child_variations?.[0]?.price || 0);
+                    : (childVariations?.[0]?.price || 0);
 
             await connection.execute(sql, [
                 itemid,
-                it?.itemname,
+                it?.itemname || null,
+                it?.itemdescription || null,
                 price,
-                it?.categoryid,
-                it?.child_variations ? 1 : 0,
-                safeJson(it?.child_variations),
-                it?.addons ? 1 : 0,
-                safeJson(it?.addons),
+                categoryId,
+                hasVariation ? 1 : 0,
+                safeJson(childVariations),
+                hasAddon ? 1 : 0,
+                safeJson(addonPayload),
+                it?.in_stock ?? 2,
             ]);
+
+            count++;
         }
 
         await connection.commit();
 
-        console.log("✅ PUSH MENU SAVED:", items.length);
+        console.log("✅ PUSH MENU SAVED:", count);
 
-        return { success: true };
+        return {
+            success: true,
+            count
+        };
 
     } catch (err) {
         await connection.rollback();
-        console.error("❌ PUSH ERROR:", err);
+        console.error("❌ PUSH ERROR:", err?.message || err);
         throw err;
     } finally {
         connection.release();
