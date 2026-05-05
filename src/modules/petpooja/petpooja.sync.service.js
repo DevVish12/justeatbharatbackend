@@ -190,3 +190,11 @@ export const syncPushMenuData = async (restaurant) => {
         connection.release();
     }
 };
+
+export const syncPetpoojaMenu = async () => {
+    console.log("⚠️ Manual sync disabled (PUSH only mode)");
+    return {
+        success: true,
+        message: "Sync skipped (using PUSH menu only)"
+    };
+};
