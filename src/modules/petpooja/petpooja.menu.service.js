@@ -21,15 +21,46 @@ export const invalidatePetpoojaMenuCache = () => {
 // ================= SAFE ARRAY =================
 const safeArray = (v) => (Array.isArray(v) ? v : []);
 
-const parseVariation = (raw) => {
-    // STEP 4 — API RESPONSE FIX: never return variation: null
-    if (Array.isArray(raw)) return raw;
-    if (!raw) return [];
-
+const normalizeVariation = (variationValue) => {
     try {
-        const parsed = typeof raw === "string" ? JSON.parse(raw || "[]") : raw;
-        return Array.isArray(parsed) ? parsed : [];
-    } catch {
+        if (Array.isArray(variationValue)) {
+            return variationValue;
+        }
+
+        // MySQL may return TEXT/JSON as a Buffer in some driver modes
+        if (Buffer.isBuffer(variationValue)) {
+            variationValue = variationValue.toString("utf8");
+        }
+
+        if (variationValue && typeof variationValue === "object") {
+            return [variationValue];
+        }
+
+        if (typeof variationValue === "string") {
+            const trimmed = variationValue.trim();
+            if (!trimmed) return [];
+
+            let parsed = JSON.parse(trimmed || "[]");
+
+            // Handle double-stringified JSON (e.g. "[{...}]" as a JSON string)
+            if (typeof parsed === "string") {
+                parsed = JSON.parse(parsed || "[]");
+            }
+
+            if (Array.isArray(parsed)) {
+                return parsed;
+            }
+
+            if (parsed && typeof parsed === "object") {
+                return [parsed];
+            }
+
+            return [];
+        }
+
+        return [];
+    } catch (err) {
+        console.error("❌ VARIATION PARSE FAILED:", err?.message);
         return [];
     }
 };
@@ -88,10 +119,42 @@ const readMenuFromDb = async () => {
         await createCategoryTable();
         const [cats] = await pool.execute(`SELECT * FROM menu_categories`);
 
-        const normalizedItems = (rows || []).map((row) => ({
-            ...row,
-            variation: parseVariation(row?.variation),
-        }));
+        const normalizedItems = (rows || []).map((row) => {
+            const variations = normalizeVariation(row?.variation);
+
+            // STEP 5 — DEBUG LOGS (only for likely-variant items)
+            if (Number(row?.itemallowvariation) === 1 || (typeof row?.variation === "string" && row.variation.trim())) {
+                console.log(
+                    "🔥 MENU API VARIATION DEBUG",
+                    row?.itemname,
+                    row?.variation
+                );
+                console.log(
+                    "🔥 MENU API PARSED VARIATION",
+                    row?.itemname,
+                    variations
+                );
+            }
+
+            // STEP 4 — LOWEST PRICE FALLBACK (API response only)
+            const basePrice = Number(row?.price || 0);
+            const variantPrices = variations
+                .map((v) => Number(v?.price || 0))
+                .filter((n) => Number.isFinite(n) && n > 0);
+
+            const lowestVariantPrice =
+                variantPrices.length > 0
+                    ? Math.min(...variantPrices)
+                    : 0;
+
+            const effectivePrice = basePrice > 0 ? basePrice : lowestVariantPrice;
+
+            return {
+                ...row,
+                price: Number.isFinite(effectivePrice) ? effectivePrice : 0,
+                variation: variations,
+            };
+        });
 
         return {
             categories: cats || [],
