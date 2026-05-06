@@ -1,34 +1,14 @@
 import axios from "axios";
 import petpoojaConfig from "../../config/petpooja.js";
-import {
-    PETPOOJA_DEFAULT_TIMEOUT_MS,
-    PETPOOJA_HEADER_ACCESS_TOKEN,
-    PETPOOJA_HEADER_APP_KEY,
-    PETPOOJA_HEADER_APP_SECRET,
-} from "./petpooja.constants.js";
+import { PETPOOJA_DEFAULT_TIMEOUT_MS } from "./petpooja.constants.js";
 
 /* =========================
    HEADERS BUILDER
 ========================= */
 const buildPetpoojaHeaders = () => {
-    const headers = {
+    return {
         "Content-Type": "application/json",
     };
-
-    if (petpoojaConfig.appKey) {
-        headers[PETPOOJA_HEADER_APP_KEY] = petpoojaConfig.appKey;
-        console.log("PETPOOJA HEADERS", headers);
-    }
-
-    if (petpoojaConfig.appSecret) {
-        headers[PETPOOJA_HEADER_APP_SECRET] = petpoojaConfig.appSecret;
-    }
-
-    if (petpoojaConfig.accessToken) {
-        headers[PETPOOJA_HEADER_ACCESS_TOKEN] = petpoojaConfig.accessToken;
-    }
-
-    return headers;
 };
 
 /* =========================
@@ -37,7 +17,6 @@ const buildPetpoojaHeaders = () => {
 export const assertPetpoojaConfigured = () => {
     const missing = [];
 
-    // ✅ ONLY ORDER BASE REQUIRED (LIVE PUSH MODE)
     if (!petpoojaConfig.orderBaseUrl) {
         missing.push("PETPOOJA_ORDER_BASE_URL");
     }
@@ -54,6 +33,10 @@ export const assertPetpoojaConfigured = () => {
         missing.push("PETPOOJA_ACCESS_TOKEN");
     }
 
+    if (!petpoojaConfig.restId) {
+        missing.push("PETPOOJA_REST_ID");
+    }
+
     if (missing.length > 0) {
         const error = new Error(
             `Petpooja is not configured. Missing env vars: ${missing.join(", ")}`
@@ -64,9 +47,8 @@ export const assertPetpoojaConfigured = () => {
 };
 
 /* =========================
-   MENU CLIENT (OPTIONAL)
+   MENU CLIENT
 ========================= */
-// ⚠️ LIVE में USE नहीं होगा (push only)
 export const petpoojaMenuClient = petpoojaConfig.menuBaseUrl
     ? axios.create({
           baseURL: petpoojaConfig.menuBaseUrl,
@@ -76,7 +58,7 @@ export const petpoojaMenuClient = petpoojaConfig.menuBaseUrl
     : null;
 
 /* =========================
-   ORDER CLIENT (MAIN)
+   ORDER CLIENT
 ========================= */
 export const petpoojaOrderClient = axios.create({
     baseURL: petpoojaConfig.orderBaseUrl,
@@ -90,7 +72,6 @@ export const petpoojaOrderClient = axios.create({
 export const toHttpErrorPayload = (error) => {
     const response = error?.response;
 
-    // 🔥 Petpooja API error
     if (response) {
         return {
             statusCode: response.status || 502,
@@ -101,7 +82,6 @@ export const toHttpErrorPayload = (error) => {
         };
     }
 
-    // 🔥 Network / server error
     return {
         statusCode: error?.statusCode || 500,
         body: {

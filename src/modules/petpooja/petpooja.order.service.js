@@ -71,87 +71,99 @@ export const sendOrderToPetpooja = async (payload) => {
         enable_delivery: payload.enable_delivery || "1",
     };
 
-    const orderPayload = {
+   const orderPayload = {
 
-        // ❗ REMOVE FROM BODY (IMPORTANT)
-        // app_key
-        // app_secret
-        // access_token
+    // ✅ REQUIRED IN BODY
+    app_key: petpoojaConfig.appKey,
+    app_secret: petpoojaConfig.appSecret,
+    access_token: petpoojaConfig.accessToken,
 
-        orderinfo: {
-            OrderInfo: {
+    orderinfo: {
+        OrderInfo: {
 
-                Restaurant: {
-                    details: {
-                        restID: petpoojaConfig.restId
-                    }
-                },
-
-                Customer: {
-                    details: {
-                        name: finalPayload.name,
-                        phone: finalPayload.phone,
-                        address: finalPayload.address
-                    }
-                },
-
-                Order: {
-                    details: {
-                        orderID: finalPayload.orderID,
-                        preorder_date: finalPayload.preorder_date,
-                        preorder_time: finalPayload.preorder_time,
-                        advanced_order: finalPayload.advanced_order,
-                        order_type: finalPayload.order_type,
-                        payment_type: finalPayload.payment_type,
-                        total: String(finalPayload.total),
-                        tax_total: String(finalPayload.tax_total),
-                        created_on: finalPayload.created_on,
-                        dc_tax_percentage: finalPayload.dc_tax_percentage,
-                        pc_tax_percentage: finalPayload.pc_tax_percentage,
-                        enable_delivery: finalPayload.enable_delivery,
-
-                        min_prep_time: finalPayload.min_prep_time || 20,
-
-                        collect_cash:
-                            finalPayload.payment_type === "COD"
-                                ? String(finalPayload.total)
-                                : "0",
-
-                        description: finalPayload.description || "",
-                        callback_url: petpoojaConfig.callbackUrl
-                    }
-                },
-
-                OrderItem: {
-                    details: finalPayload.order_items.map(item => ({
-                        id: item.id,
-                        name: item.name,
-                        price: String(item.price),
-                        final_price: String(item.final_price || item.price),
-                        quantity: String(item.quantity),
-                        gst_liability: "restaurant",
-                        tax_inclusive: true,
-                        item_tax: [],
-                        // ✅ Variation support (safe fallback)
-                        variation_name: String(
-                            item?.variation_name ?? item?.variationName ?? item?.variant ?? item?.variant_name ?? ""
-                        ).trim(),
-                        variation_id: String(
-                            item?.variation_id ?? item?.variationId ?? item?.variant_id ?? item?.variantId ?? ""
-                        ).trim(),
-                        AddonItem: { details: [] }
-                    }))
-                },
-
-                Tax: {
-                    details: finalPayload.tax_details || []
+            Restaurant: {
+                details: {
+                    restID: petpoojaConfig.restId
                 }
-
             },
 
-            device_type: "Web"
-        }
-    };
+            Customer: {
+                details: {
+                    name: finalPayload.name,
+                    phone: finalPayload.phone,
+                    address: finalPayload.address
+                }
+            },
+
+            Order: {
+                details: {
+                    orderID: finalPayload.orderID,
+                    preorder_date: finalPayload.preorder_date,
+                    preorder_time: finalPayload.preorder_time,
+                    advanced_order: finalPayload.advanced_order,
+                    order_type: finalPayload.order_type,
+                    payment_type: finalPayload.payment_type,
+                    total: String(finalPayload.total),
+                    tax_total: String(finalPayload.tax_total),
+                    created_on: finalPayload.created_on,
+                    dc_tax_percentage: finalPayload.dc_tax_percentage,
+                    pc_tax_percentage: finalPayload.pc_tax_percentage,
+                    enable_delivery: finalPayload.enable_delivery,
+
+                    min_prep_time: finalPayload.min_prep_time || 20,
+
+                    collect_cash:
+                        finalPayload.payment_type === "COD"
+                            ? String(finalPayload.total)
+                            : "0",
+
+                    description: finalPayload.description || "",
+                    callback_url: petpoojaConfig.callbackUrl
+                }
+            },
+
+            OrderItem: {
+                details: finalPayload.order_items.map(item => ({
+                    id: item.id,
+                    name: item.name,
+                    price: String(item.price),
+                    final_price: String(item.final_price || item.price),
+                    quantity: String(item.quantity),
+                    gst_liability: "restaurant",
+                    tax_inclusive: true,
+                    item_tax: [],
+
+                    variation_name: String(
+                        item?.variation_name ??
+                        item?.variationName ??
+                        item?.variant ??
+                        item?.variant_name ??
+                        ""
+                    ).trim(),
+
+                    variation_id: String(
+                        item?.variation_id ??
+                        item?.variationId ??
+                        item?.variant_id ??
+                        item?.variantId ??
+                        ""
+                    ).trim(),
+
+                    AddonItem: {
+                        details: []
+                    }
+                }))
+            },
+
+            Tax: {
+                details: finalPayload.tax_details || []
+            }
+
+        },
+
+        device_type: "Web"
+    }
+};
 
     console.log("[PETPOOJA ORDER PAYLOAD]", JSON.stringify(orderPayload, null, 2));
 
