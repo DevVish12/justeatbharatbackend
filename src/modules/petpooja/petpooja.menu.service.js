@@ -21,6 +21,19 @@ export const invalidatePetpoojaMenuCache = () => {
 // ================= SAFE ARRAY =================
 const safeArray = (v) => (Array.isArray(v) ? v : []);
 
+const parseVariation = (raw) => {
+    // STEP 4 — API RESPONSE FIX: never return variation: null
+    if (Array.isArray(raw)) return raw;
+    if (!raw) return [];
+
+    try {
+        const parsed = typeof raw === "string" ? JSON.parse(raw || "[]") : raw;
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+};
+
 
 // ================= APPLY CUSTOM IMAGES =================
 const applyCustomDishImages = async (menu) => {
@@ -75,9 +88,14 @@ const readMenuFromDb = async () => {
         await createCategoryTable();
         const [cats] = await pool.execute(`SELECT * FROM menu_categories`);
 
+        const normalizedItems = (rows || []).map((row) => ({
+            ...row,
+            variation: parseVariation(row?.variation),
+        }));
+
         return {
             categories: cats || [],
-            items: rows || [],
+            items: normalizedItems,
             taxes: [],
             discounts: [],
             addongroups: [],

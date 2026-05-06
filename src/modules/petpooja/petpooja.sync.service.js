@@ -129,17 +129,28 @@ export const syncPushMenuData = async (restaurant) => {
             const itemid = String(it?.itemid ?? "").trim();
             if (!itemid) continue;
 
+            // STEP 1 — VERIFY RAW PETPOOJA VARIATION DATA (temporary debug)
+            // Do not remove existing logs.
+            console.log(
+                "ITEM VARIATION DEBUG:",
+                it?.itemname,
+                JSON.stringify(it?.variation, null, 2)
+            );
+
             // ✅ CATEGORY
             const categoryId =
                 it?.categoryid ||
                 it?.item_categoryid ||
                 null;
 
-            // ✅ VARIATION
-            const childVariations = it?.child_variations || null;
-            const hasVariation =
-                Array.isArray(childVariations) &&
-                childVariations.length > 0;
+                        // ✅ VARIATION (Petpooja sends variants in `variation` array; keep fallback to older fields)
+                        const safeVariation = Array.isArray(it?.variation)
+                                ? it.variation
+                                : Array.isArray(it?.child_variations)
+                                    ? it.child_variations
+                                    : [];
+
+                        const hasVariation = safeVariation.length > 0;
 
             // ✅ ADDONS
             const addonPayload =
@@ -152,10 +163,11 @@ export const syncPushMenuData = async (restaurant) => {
             const hasAddon = addonPayload !== null;
 
             // ✅ PRICE FIX (MOST IMPORTANT)
+            // Petpooja may intentionally set base item price = 0 for variant items.
             const price =
                 Number(it?.price) > 0
                     ? Number(it.price)
-                    : (childVariations?.[0]?.price || 0);
+                    : Number(safeVariation?.[0]?.price || 0);
 
                 const queryParams = [
     itemid ? String(itemid) : null,
@@ -164,7 +176,8 @@ export const syncPushMenuData = async (restaurant) => {
     Number(price || 0),
     categoryId ? String(categoryId) : null,
     hasVariation ? 1 : 0,
-    safeJson(childVariations ?? null),
+    // STEP 3 — SAVE VARIATIONS SAFELY (never store null/undefined)
+    JSON.stringify(safeVariation),
     hasAddon ? 1 : 0,
     safeJson(addonPayload ?? null),
     Number(it?.in_stock ?? 2),
