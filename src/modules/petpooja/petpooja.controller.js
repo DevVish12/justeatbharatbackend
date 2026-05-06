@@ -116,6 +116,8 @@ export const updateStoreStatus = async (req, res) => {
 
 /* ================= 🔥 PUSH MENU ================= */
 export const pushMenu = async (req, res) => {
+    console.log("🚀 PETPOOJA PUSH API HIT");
+    console.log("🚀 PUSH TIME:", new Date().toISOString());
 
     console.log("🔥 PUSH MENU RECEIVED:", JSON.stringify(req.body, null, 2));
 
@@ -138,6 +140,12 @@ export const pushMenu = async (req, res) => {
 
         console.log("📦 CATEGORIES:", categories.length);
         console.log("🍽 ITEMS:", items.length);
+        if (items.length > 0) {
+    console.log(
+        "🧪 FIRST ITEM KEYS:",
+        Object.keys(items[0] || {})
+    );
+}
 
         // ❗ ALWAYS ACK SUCCESS (Petpooja rule)
         if (!categories.length && !items.length) {

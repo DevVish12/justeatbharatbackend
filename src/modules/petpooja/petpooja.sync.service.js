@@ -140,7 +140,7 @@ export const syncPushMenuData = async (restaurant) => {
             console.log(
                 "ITEM VARIATION DEBUG",
                 it?.itemname,
-                JSON.stringify(rawVariation)
+                JSON.stringify(rawVariation,  null, 2)
             );
 
             // ✅ CATEGORY
