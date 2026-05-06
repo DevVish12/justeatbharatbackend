@@ -1,6 +1,22 @@
 import pool from "../../config/db.js";
 import { createCategoryTable } from "./menu.category.model.js";
 
+const parseVariation = (raw) => {
+    if (Array.isArray(raw)) return raw;
+    if (!raw) return [];
+
+    if (typeof raw === "string") {
+        try {
+            const parsed = JSON.parse(raw || "[]");
+            return Array.isArray(parsed) ? parsed : [];
+        } catch {
+            return [];
+        }
+    }
+
+    return [];
+};
+
 export const getMenuFromDb = async (req, res) => {
     try {
         await createCategoryTable();
@@ -30,10 +46,15 @@ export const getMenuFromDb = async (req, res) => {
             }
         }
 
+        const normalizedItems = (rows || []).map((row) => ({
+            ...row,
+            variation: parseVariation(row?.variation),
+        }));
+
         return res.status(200).json({
             success: true,
             categories: Array.from(categoriesById.values()),
-            items: rows || [],
+            items: normalizedItems,
         });
     } catch (error) {
         return res.status(500).json({

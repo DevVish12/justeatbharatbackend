@@ -129,12 +129,18 @@ export const syncPushMenuData = async (restaurant) => {
             const itemid = String(it?.itemid ?? "").trim();
             if (!itemid) continue;
 
-            // STEP 1 — VERIFY RAW PETPOOJA VARIATION DATA (temporary debug)
-            // Do not remove existing logs.
+            // STEP 1 — ADD DEBUG LOG (do not remove existing logs)
+            const rawVariation =
+                it?.variation ||
+                it?.variations ||
+                it?.item_variation ||
+                it?.child_variations ||
+                [];
+
             console.log(
-                "ITEM VARIATION DEBUG:",
+                "ITEM VARIATION DEBUG",
                 it?.itemname,
-                JSON.stringify(it?.variation, null, 2)
+                JSON.stringify(rawVariation)
             );
 
             // ✅ CATEGORY
@@ -143,12 +149,8 @@ export const syncPushMenuData = async (restaurant) => {
                 it?.item_categoryid ||
                 null;
 
-                        // ✅ VARIATION (Petpooja sends variants in `variation` array; keep fallback to older fields)
-                        const safeVariation = Array.isArray(it?.variation)
-                                ? it.variation
-                                : Array.isArray(it?.child_variations)
-                                    ? it.child_variations
-                                    : [];
+                        // STEP 2 — SAVE REAL VARIATIONS (never save null/undefined)
+                        const safeVariation = Array.isArray(rawVariation) ? rawVariation : [];
 
                         const hasVariation = safeVariation.length > 0;
 
@@ -176,8 +178,7 @@ export const syncPushMenuData = async (restaurant) => {
     Number(price || 0),
     categoryId ? String(categoryId) : null,
     hasVariation ? 1 : 0,
-    // STEP 3 — SAVE VARIATIONS SAFELY (never store null/undefined)
-    JSON.stringify(safeVariation),
+    JSON.stringify(safeVariation || []),
     hasAddon ? 1 : 0,
     safeJson(addonPayload ?? null),
     Number(it?.in_stock ?? 2),
