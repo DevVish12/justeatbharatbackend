@@ -157,18 +157,23 @@ export const syncPushMenuData = async (restaurant) => {
                     ? Number(it.price)
                     : (childVariations?.[0]?.price || 0);
 
-            await connection.execute(sql, [
-                itemid,
-                it?.itemname || null,
-                it?.itemdescription || null,
-                price,
-                categoryId,
-                hasVariation ? 1 : 0,
-                safeJson(childVariations),
-                hasAddon ? 1 : 0,
-                safeJson(addonPayload),
-                it?.in_stock ?? 2,
-            ]);
+           const queryParams = [
+    itemid || null,
+    String(it?.itemname || "").trim() || null,
+    String(it?.itemdescription || "").trim() || null,
+    Number(price || 0),
+    categoryId || null,
+    hasVariation ? 1 : 0,
+    safeJson(childVariations) || null,
+    hasAddon ? 1 : 0,
+    safeJson(addonPayload) || null,
+    Number(it?.in_stock ?? 2),
+];
+
+// DEBUG
+console.log("MYSQL PARAMS:", queryParams);
+
+await connection.execute(sql, queryParams);
 
             count++;
         }
