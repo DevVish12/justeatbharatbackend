@@ -17,6 +17,7 @@ const buildPetpoojaHeaders = () => {
 
     if (petpoojaConfig.appKey) {
         headers[PETPOOJA_HEADER_APP_KEY] = petpoojaConfig.appKey;
+        console.log("PETPOOJA HEADERS", headers);
     }
 
     if (petpoojaConfig.appSecret) {
