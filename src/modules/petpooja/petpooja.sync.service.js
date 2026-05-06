@@ -170,6 +170,7 @@ export const syncPushMenuData = async (restaurant) => {
     Number(it?.in_stock ?? 2),
 ];
 
+
 console.log("MYSQL PARAMS:", JSON.stringify(queryParams, null, 2));
 
 await connection.execute(sql, queryParams);
