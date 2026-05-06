@@ -47,6 +47,18 @@ export const sendOrderToPetpooja = async (payload) => {
     assertPetpoojaConfigured();
     validateSaveOrderPayload(payload);
 
+    const endpointUrl = (() => {
+        try {
+            return new URL(PETPOOJA_SAVE_ORDER_ENDPOINT, petpoojaConfig.orderBaseUrl).toString();
+        } catch {
+            return `${petpoojaConfig.orderBaseUrl || ""}${PETPOOJA_SAVE_ORDER_ENDPOINT}`;
+        }
+    })();
+
+    console.log("[PETPOOJA LIVE ENDPOINT URL]", endpointUrl);
+    console.log("[PETPOOJA ORDER ID]", String(payload?.orderID || ""));
+    console.log("[PETPOOJA PAYMENT TYPE]", String(payload?.payment_type || ""));
+
     const now = new Date();
 
     const finalPayload = {
@@ -120,8 +132,13 @@ export const sendOrderToPetpooja = async (payload) => {
                         gst_liability: "restaurant",
                         tax_inclusive: true,
                         item_tax: [],
-                        variation_name: "",
-                        variation_id: "",
+                        // ✅ Variation support (safe fallback)
+                        variation_name: String(
+                            item?.variation_name ?? item?.variationName ?? item?.variant ?? item?.variant_name ?? ""
+                        ).trim(),
+                        variation_id: String(
+                            item?.variation_id ?? item?.variationId ?? item?.variant_id ?? item?.variantId ?? ""
+                        ).trim(),
                         AddonItem: { details: [] }
                     }))
                 },
@@ -136,14 +153,26 @@ export const sendOrderToPetpooja = async (payload) => {
         }
     };
 
-    console.log("FINAL ORDER PAYLOAD", orderPayload);
+    console.log("[PETPOOJA ORDER PAYLOAD]", JSON.stringify(orderPayload, null, 2));
 
-    const response = await petpoojaOrderClient.post(
-        PETPOOJA_SAVE_ORDER_ENDPOINT,
-        orderPayload
-    );
+    try {
+        const response = await petpoojaOrderClient.post(
+            PETPOOJA_SAVE_ORDER_ENDPOINT,
+            orderPayload
+        );
 
-    return response.data;
+        console.log("[PETPOOJA API STATUS]", response?.status);
+        console.log("[PETPOOJA RESPONSE]", response?.data);
+
+        return response.data;
+    } catch (error) {
+        console.error("[PETPOOJA API ERROR]", {
+            status: error?.response?.status,
+            data: error?.response?.data,
+            message: error?.message,
+        });
+        throw error;
+    }
 };
 
 

@@ -65,10 +65,13 @@ const normalizePetpoojaOrderType = (value) => {
 
 const normalizePetpoojaPaymentType = (value) => {
     const v = String(value || "").trim().toUpperCase();
-    if (v === "ONLINE") return "ONLINE";
-    if (v === "OFFLINE") return "COD";
-    if (v === "COD") return "COD";
-    return "COD";
+    let finalType = "COD";
+    if (v === "ONLINE") finalType = "ONLINE";
+    else if (v === "OFFLINE") finalType = "COD";
+    else if (v === "COD") finalType = "COD";
+
+    console.log("PETPOOJA PAYMENT TYPE:", finalType);
+    return finalType;
 };
 
 const formatAmount = (value) => {
@@ -85,7 +88,93 @@ const extractSavedOrderItems = (createdOrderRow) => {
     }
 };
 
-const buildPetpoojaPayloadFromOrder = ({ createdOrderRow, reqBody }) => {
+const normalizeVariationNameFromItem = (item) => {
+    const raw =
+        item?.variation_name ??
+        item?.variationName ??
+        item?.variant_name ??
+        item?.variantName ??
+        item?.variant ??
+        "";
+    return String(raw || "").trim();
+};
+
+const normalizeVariationIdFromItem = (item) => {
+    const raw =
+        item?.variation_id ??
+        item?.variationId ??
+        item?.variant_id ??
+        item?.variantId ??
+        "";
+    return String(raw || "").trim();
+};
+
+const parseMenuVariationList = (raw) => {
+    if (!raw) return [];
+    try {
+        const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+};
+
+const getMenuVariationsByItemIds = async (itemIds) => {
+    const ids = Array.from(
+        new Set(
+            (Array.isArray(itemIds) ? itemIds : [])
+                .map((v) => String(v || "").trim())
+                .filter(Boolean)
+        )
+    );
+
+    if (ids.length === 0) return new Map();
+
+    try {
+        const placeholders = ids.map(() => "?").join(",");
+        const [rows] = await pool.query(
+            `SELECT itemid, variation FROM menu_items WHERE itemid IN (${placeholders})`,
+            ids
+        );
+
+        const byItemId = new Map();
+        for (const row of rows || []) {
+            const itemid = String(row?.itemid || "").trim();
+            if (!itemid) continue;
+            byItemId.set(itemid, parseMenuVariationList(row?.variation));
+        }
+        return byItemId;
+    } catch (error) {
+        console.error("[PETPOOJA VARIATION] Failed to read menu variations", {
+            message: error?.message,
+        });
+        return new Map();
+    }
+};
+
+const resolveVariationFromMenu = ({ itemId, variationName, menuVariationsByItemId }) => {
+    if (!itemId || !variationName || !menuVariationsByItemId) {
+        return { variationId: "", variationName: variationName || "" };
+    }
+
+    const variations = menuVariationsByItemId.get(String(itemId)) || [];
+    const wanted = String(variationName).trim().toLowerCase();
+    if (!wanted) return { variationId: "", variationName: "" };
+
+    const found = variations.find((v) => {
+        const name = String(v?.name ?? v?.variationname ?? "").trim().toLowerCase();
+        return name === wanted;
+    });
+
+    const variationId = String(found?.variationid ?? found?.id ?? "").trim();
+    const finalName = String(found?.name ?? found?.variationname ?? variationName).trim();
+    return {
+        variationId,
+        variationName: finalName,
+    };
+};
+
+const buildPetpoojaPayloadFromOrder = ({ createdOrderRow, reqBody, menuVariationsByItemId }) => {
     const items = extractSavedOrderItems(createdOrderRow);
 
     const orderType = normalizePetpoojaOrderType(createdOrderRow?.order_type);
@@ -103,6 +192,21 @@ const buildPetpoojaPayloadFromOrder = ({ createdOrderRow, reqBody }) => {
             const price = Number(item?.price);
             const quantity = Number(item?.quantity ?? item?.qty);
 
+            const variationNameFromItem = normalizeVariationNameFromItem(item);
+            const variationIdFromItem = normalizeVariationIdFromItem(item);
+
+            const resolved =
+                variationIdFromItem || !variationNameFromItem
+                    ? {
+                          variationId: variationIdFromItem,
+                          variationName: variationNameFromItem,
+                      }
+                    : resolveVariationFromMenu({
+                          itemId: id,
+                          variationName: variationNameFromItem,
+                          menuVariationsByItemId,
+                      });
+
             if (!id || !name || !Number.isFinite(price) || !Number.isFinite(quantity)) {
                 return null;
             }
@@ -115,6 +219,10 @@ const buildPetpoojaPayloadFromOrder = ({ createdOrderRow, reqBody }) => {
                 quantity: String(quantity),
                 gst_liability: "restaurant",
                 tax_inclusive: true,
+
+                // ✅ Variation support (safe fallback)
+                variation_name: String(resolved?.variationName || "").trim(),
+                variation_id: String(resolved?.variationId || "").trim(),
             };
         })
         .filter(Boolean);
@@ -136,42 +244,84 @@ const buildPetpoojaPayloadFromOrder = ({ createdOrderRow, reqBody }) => {
     };
 };
 
-let ensuredPetpoojaResponseColumn = false;
+let ensuredPetpoojaOrderMetaColumns = false;
 
-const ensurePetpoojaResponseColumn = async () => {
-    if (ensuredPetpoojaResponseColumn) return;
+const ensurePetpoojaOrderMetaColumns = async () => {
+    if (ensuredPetpoojaOrderMetaColumns) return;
     try {
-        await pool.query(
-            `ALTER TABLE orders ADD COLUMN petpooja_response LONGTEXT NULL`
-        );
-    } catch (error) {
-        // If it already exists (or table doesn't support ALTER here), just continue.
-        if (error?.code !== "ER_DUP_FIELDNAME") {
-            throw error;
+        const alters = [
+            `ALTER TABLE orders ADD COLUMN petpooja_response LONGTEXT NULL`,
+            `ALTER TABLE orders ADD COLUMN petpooja_status VARCHAR(50) NULL`,
+            `ALTER TABLE orders ADD COLUMN petpooja_error LONGTEXT NULL`,
+            `ALTER TABLE orders ADD COLUMN petpooja_synced_at DATETIME NULL`,
+        ];
+
+        for (const sql of alters) {
+            try {
+                await pool.query(sql);
+            } catch (error) {
+                if (error?.code === "ER_DUP_FIELDNAME") continue;
+                // Don't crash the app on schema drift; log for visibility.
+                console.error("[PETPOOJA DB] Failed to ensure column", {
+                    sql,
+                    message: error?.message,
+                    code: error?.code,
+                });
+            }
         }
     } finally {
-        ensuredPetpoojaResponseColumn = true;
+        ensuredPetpoojaOrderMetaColumns = true;
     }
 };
 
-const persistPetpoojaResponse = async ({ orderDbId, response }) => {
-    const serialized = JSON.stringify(response ?? null);
+const persistPetpoojaOrderMeta = async ({
+    orderDbId,
+    status,
+    response,
+    error,
+    syncedAt,
+}) => {
+    const serializedResponse = JSON.stringify(response ?? null);
+    const serializedError =
+        error == null
+            ? null
+            : typeof error === "string"
+              ? error
+              : JSON.stringify(error);
+    const syncedAtValue = syncedAt || null;
+
+    const doUpdate = async () => {
+        await pool.query(
+            `
+                UPDATE orders
+                SET petpooja_response = ?, petpooja_status = ?, petpooja_error = ?, petpooja_synced_at = ?
+                WHERE id = ?
+            `,
+            [serializedResponse, status || null, serializedError, syncedAtValue, orderDbId]
+        );
+    };
+
     try {
-        await pool.query(`UPDATE orders SET petpooja_response = ? WHERE id = ?`, [
-            serialized,
-            orderDbId,
-        ]);
-    } catch (error) {
-        // Auto-heal older DBs missing this column.
-        if (error?.code === "ER_BAD_FIELD_ERROR") {
-            await ensurePetpoojaResponseColumn();
-            await pool.query(`UPDATE orders SET petpooja_response = ? WHERE id = ?`, [
-                serialized,
-                orderDbId,
-            ]);
-            return;
+        await doUpdate();
+    } catch (dbError) {
+        if (dbError?.code === "ER_BAD_FIELD_ERROR") {
+            await ensurePetpoojaOrderMetaColumns();
+            try {
+                await doUpdate();
+                return;
+            } catch (retryError) {
+                console.error("[PETPOOJA DB] Failed to persist Petpooja meta (retry)", {
+                    order_id: orderDbId,
+                    message: retryError?.message,
+                });
+                return;
+            }
         }
-        throw error;
+
+        console.error("[PETPOOJA DB] Failed to persist Petpooja meta", {
+            order_id: orderDbId,
+            message: dbError?.message,
+        });
     }
 };
 
@@ -309,9 +459,21 @@ export const createOrderController = async (req, res, next) => {
                 razorpayOrderId: null,
             });
 
+            const itemsForVariation = extractSavedOrderItems(created);
+            const menuVariationsByItemId = await getMenuVariationsByItemIds(
+                itemsForVariation.map((it) => it?.itemid ?? it?.itemId ?? it?.id)
+            );
+
             const petpoojaPayload = buildPetpoojaPayloadFromOrder({
                 createdOrderRow: created,
                 reqBody: req.body,
+                menuVariationsByItemId,
+            });
+
+            console.log("[PETPOOJA OFFLINE] sending order", {
+                order_id: created?.order_id,
+                payment_method: created?.payment_method,
+                payment_status: created?.payment_status,
             });
 
             let petpoojaResponse = null;
@@ -333,17 +495,16 @@ export const createOrderController = async (req, res, next) => {
                 };
             }
 
-            try {
-                await persistPetpoojaResponse({
-                    orderDbId: created.id,
-                    response: petpoojaResponse,
-                });
-            } catch (persistError) {
-                console.error("[Petpooja] Failed to persist petpooja_response", {
-                    order_id: created?.order_id,
-                    message: persistError?.message,
-                });
-            }
+            await persistPetpoojaOrderMeta({
+                orderDbId: created.id,
+                status: petpoojaResponse?.success || petpoojaResponse?.ok ? "SUCCESS" : "FAILED",
+                response: petpoojaResponse,
+                error:
+                    petpoojaResponse?.success || petpoojaResponse?.ok
+                        ? null
+                        : petpoojaResponse,
+                syncedAt: formatMysqlDatetime(new Date()),
+            });
 
             return res.status(201).json({
                 message: "Order placed",
@@ -379,41 +540,14 @@ export const createOrderController = async (req, res, next) => {
             razorpayOrderId: rpOrder.id,
         });
 
-        const petpoojaPayload = buildPetpoojaPayloadFromOrder({
-            createdOrderRow: created,
-            reqBody: req.body,
+        // ✅ ONLINE orders must be sent to Petpooja only AFTER payment verification.
+        await persistPetpoojaOrderMeta({
+            orderDbId: created.id,
+            status: "PENDING_PAYMENT",
+            response: null,
+            error: null,
+            syncedAt: null,
         });
-
-        let petpoojaResponse = null;
-        try {
-            petpoojaResponse = await sendOrderToPetpooja(petpoojaPayload);
-        } catch (error) {
-            console.error("[Petpooja] Failed to send order (online)", {
-                order_id: created?.order_id,
-                message: error?.message,
-                status: error?.response?.status,
-                data: error?.response?.data,
-            });
-            petpoojaResponse = {
-                ok: false,
-                error: error?.message || "Petpooja send failed",
-                status: error?.response?.status,
-                data: error?.response?.data,
-                at: formatMysqlDatetime(new Date()),
-            };
-        }
-
-        try {
-            await persistPetpoojaResponse({
-                orderDbId: created.id,
-                response: petpoojaResponse,
-            });
-        } catch (persistError) {
-            console.error("[Petpooja] Failed to persist petpooja_response", {
-                order_id: created?.order_id,
-                message: persistError?.message,
-            });
-        }
 
         return res.status(201).json({
             message: "Razorpay order created",
@@ -452,6 +586,13 @@ export const verifyRazorpayPaymentController = async (req, res, next) => {
             return res.status(400).json({ message: "Invalid payment signature" });
         }
 
+        console.log("[RAZORPAY VERIFY STATUS]", {
+            ok: true,
+            order_id: orderId || null,
+            razorpay_order_id: razorpayOrderId,
+            razorpay_payment_id: razorpayPaymentId,
+        });
+
         // Prefer linking by our receipt order id if provided.
         let updated = null;
         if (orderId) {
@@ -474,6 +615,76 @@ export const verifyRazorpayPaymentController = async (req, res, next) => {
                 razorpayOrderId,
                 razorpayPaymentId,
             });
+        }
+
+        // ✅ AFTER payment verification, send ONLINE orders to Petpooja Live POS
+        if (String(updated?.payment_method || "").toUpperCase() === "ONLINE") {
+            const alreadySynced = String(updated?.petpooja_status || "").toUpperCase() === "SUCCESS";
+            if (alreadySynced) {
+                console.log("[PETPOOJA ONLINE] already synced, skipping", {
+                    order_id: updated?.order_id,
+                    petpooja_status: updated?.petpooja_status,
+                    petpooja_synced_at: updated?.petpooja_synced_at,
+                });
+            } else {
+            const savedItems = extractSavedOrderItems(updated);
+            const menuVariationsByItemId = await getMenuVariationsByItemIds(
+                savedItems.map((it) => it?.itemid ?? it?.itemId ?? it?.id)
+            );
+
+            const petpoojaPayload = buildPetpoojaPayloadFromOrder({
+                createdOrderRow: updated,
+                reqBody: req.body,
+                menuVariationsByItemId,
+            });
+
+            console.log("[PETPOOJA ONLINE] will send after payment", {
+                order_id: updated?.order_id,
+                payment_status: updated?.payment_status,
+                payment_method: updated?.payment_method,
+                variation_preview: (petpoojaPayload?.order_items || []).map((it) => ({
+                    id: it?.id,
+                    name: it?.name,
+                    variation_id: it?.variation_id,
+                    variation_name: it?.variation_name,
+                })),
+            });
+
+            let petpoojaResponse = null;
+            try {
+                petpoojaResponse = await sendOrderToPetpooja(petpoojaPayload);
+                await persistPetpoojaOrderMeta({
+                    orderDbId: updated.id,
+                    status: "SUCCESS",
+                    response: petpoojaResponse,
+                    error: null,
+                    syncedAt: formatMysqlDatetime(new Date()),
+                });
+            } catch (error) {
+                const payload = {
+                    ok: false,
+                    error: error?.message || "Petpooja send failed",
+                    status: error?.response?.status,
+                    data: error?.response?.data,
+                    at: formatMysqlDatetime(new Date()),
+                };
+
+                console.error("[PETPOOJA ONLINE] send failed", {
+                    order_id: updated?.order_id,
+                    message: error?.message,
+                    status: error?.response?.status,
+                    data: error?.response?.data,
+                });
+
+                await persistPetpoojaOrderMeta({
+                    orderDbId: updated.id,
+                    status: "FAILED",
+                    response: petpoojaResponse,
+                    error: payload,
+                    syncedAt: formatMysqlDatetime(new Date()),
+                });
+            }
+            }
         }
 
         return res.status(200).json({
