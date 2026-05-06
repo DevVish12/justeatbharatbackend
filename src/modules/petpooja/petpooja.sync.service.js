@@ -138,9 +138,9 @@ export const syncPushMenuData = async (restaurant) => {
                 [];
 
             console.log(
-                "ITEM VARIATION DEBUG",
+                "🧪 ITEM VARIATION DEBUG",
                 it?.itemname,
-                JSON.stringify(rawVariation,  null, 2)
+                JSON.stringify(rawVariation, null, 2)
             );
 
             // ✅ CATEGORY
