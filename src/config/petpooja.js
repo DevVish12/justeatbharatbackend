@@ -21,7 +21,7 @@ const petpoojaConfig = {
     /* =========================
        IDENTIFIERS
     ========================= */
-    restId: process.env.PETPOOJA_REST_ID || "",
+    restId: process.env.PETPOOJA_MAPPING_CODE || "",
     mappingCode: process.env.PETPOOJA_MAPPING_CODE || "",
 
     /* =========================
