@@ -82,15 +82,34 @@ export const uploadHeroBannerController = async (req, res, next) => {
         const tabletPath = path.join(uploadDir, tabletFileName);
         const mobilePath = path.join(uploadDir, mobileFileName);
 
+        // const processVariant = (outputPath, width, height) =>
+        //     sharp(req.file.path, { failOnError: true })
+        //         .rotate()
+        //         .resize(width, height, {
+        //             fit: "contain",
+        //             background,
+        //         })
+        //         .webp({ quality: 85, effort: 6, smartSubsample: true })
+        //         .toFile(outputPath);
         const processVariant = (outputPath, width, height) =>
             sharp(req.file.path, { failOnError: true })
                 .rotate()
                 .resize(width, height, {
                     fit: "contain",
-                    background,
+                    background: {
+                        r: 255,
+                        g: 255,
+                        b: 255,
+                        alpha: 1,
+                    },
                 })
-                .webp({ quality: 85, effort: 6, smartSubsample: true })
+                .webp({
+                    quality: 95,
+                    effort: 6,
+                    smartSubsample: true,
+                })
                 .toFile(outputPath);
+
 
         await Promise.all([
             processVariant(desktopPath, 1920, 1080),
