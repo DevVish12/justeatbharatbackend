@@ -139,6 +139,14 @@ export const updateOrderStatus = async ({ id, orderId, status }) => {
     return getOrderByOrderId(orderId);
 };
 
+export const deleteOrderByDbId = async (id) => {
+    await pool.query(`DELETE FROM orders WHERE id = ?`, [id]);
+};
+
+export const deleteOrderByOrderId = async (orderId) => {
+    await pool.query(`DELETE FROM orders WHERE order_id = ?`, [orderId]);
+};
+
 export const markPaymentPaid = async ({ orderId, razorpayOrderId, razorpayPaymentId }) => {
     if (orderId) {
         await pool.query(

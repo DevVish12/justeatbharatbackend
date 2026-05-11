@@ -3,6 +3,7 @@ import adminAuthMiddleware from "../../middlewares/adminAuth.middleware.js";
 import userAuthMiddleware from "../../middlewares/userAuth.middleware.js";
 import {
     createOrderController,
+    deleteOrderController,
     getOrderController,
     listMyOrdersController,
     listOrdersController,
@@ -28,5 +29,6 @@ router.get("/orders/my", userAuthMiddleware, listMyOrdersController);
 router.get("/orders", adminAuthMiddleware, listOrdersController);
 router.get("/orders/:id", adminAuthMiddleware, getOrderController);
 router.put("/orders/status", adminAuthMiddleware, updateOrderStatusController);
+router.delete("/orders/:id", adminAuthMiddleware, deleteOrderController);
 
 export default router;

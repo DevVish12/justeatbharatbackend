@@ -7,6 +7,8 @@ import { bookTableByNumberForPhone } from "../reservation/reservation.model.js";
 import { getStoreOpen } from "../store/store.model.js";
 import {
     createOrder,
+    deleteOrderByDbId,
+    deleteOrderByOrderId,
     getOrderByDbId,
     getOrderByOrderId,
     getOrderByRazorpayOrderId,
@@ -764,6 +766,33 @@ export const updateOrderStatusController = async (req, res, next) => {
         return res.status(200).json({
             message: "Order status updated",
             order: buildPublicOrder(updated),
+        });
+    } catch (error) {
+        return next(error);
+    }
+};
+
+export const deleteOrderController = async (req, res, next) => {
+    try {
+        const raw = String(req.params.id || "").trim();
+        if (!raw) return res.status(400).json({ message: "Invalid id" });
+
+        const numeric = Number(raw);
+        const order = Number.isInteger(numeric) && numeric > 0
+            ? await getOrderByDbId(numeric)
+            : await getOrderByOrderId(raw);
+
+        if (!order) return res.status(404).json({ message: "Order not found" });
+
+        if (Number.isInteger(numeric) && numeric > 0) {
+            await deleteOrderByDbId(numeric);
+        } else {
+            await deleteOrderByOrderId(raw);
+        }
+
+        return res.status(200).json({
+            message: "Order deleted",
+            order: buildPublicOrder(order),
         });
     } catch (error) {
         return next(error);
